@@ -1,0 +1,29 @@
+experiment:
+  name: "stitch_cube_map"
+  seed: 1
+
+data:
+  train_dataset: "/home/mg515/ragi/360SP-data/panoramas"
+  fov: 130
+  sub_size: [1920, 1080]
+  jitter:
+    random_seed: 1
+    roll: 1.0
+    pitch: 1.0
+    yaw: 1.0
+    translate: 0.5
+    brightness: 1e-1
+    contrast: 1e-2
+    color_jitter: 1e-2
+
+train:
+  epochs: 50
+  optimizer: "adam"
+  batch_size: 1
+  lr: 1e-4
+  num_workers: 4
+
+log:
+  save_interval: 5
+  log_interval: 100
+

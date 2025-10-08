@@ -1,0 +1,8 @@
+output/
+data/
+*.jpg
+*.png
+*.gif
+runs/
+**/__PYCACHE__/
+*.pyc
