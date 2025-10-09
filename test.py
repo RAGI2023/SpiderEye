@@ -12,6 +12,7 @@ from torch.utils.tensorboard import SummaryWriter
 from model.utils.dataset import ImageFolderDataset
 from model.network import SeamNet
 from model.utils.tools import *
+from model.loss import *
 
 with open('configs/train.yaml') as f:
     g_cfg = edic(yaml.safe_load(f))
@@ -43,8 +44,8 @@ def main():
     dataset = ImageFolderDataset(
         folder_path=g_cfg.data.train_dataset,
         fov=g_cfg.data.fov,
-        out_w=g_cfg.data.sub_size[0],
-        out_h=g_cfg.data.sub_size[1],
+        out_w=g_cfg.data.patch_size[0],
+        out_h=g_cfg.data.patch_size[1],
         jitter_cfg=g_cfg.data.jitter
     )
     loader = DataLoader(
@@ -66,10 +67,9 @@ def main():
 
     # 优化器 / loss / AMP
     optimizer = torch.optim.Adam(net.parameters(), lr=g_cfg.train.lr)
-    criterion = nn.L1Loss()
     use_amp = bool(getattr(g_cfg.train, 'amp', True))
     device_type = 'cuda' if torch.cuda.is_available() else 'cpu'
-    scaler = torch.amp.GradScaler(device_type=device_type, enabled=use_amp)
+    scaler = torch.amp.GradScaler(device=device_type, enabled=use_amp)
 
 
     # 训练循环
@@ -91,13 +91,39 @@ def main():
         for i, batch in enumerate(loader):
             batch_start = time.perf_counter()
 
-            imgs = ensure_tensor_imgs(batch).to(device, non_blocking=True)
+            imgs = batch.to(device) # imgs:(B, 6, 3, H, W), [0,1]
+            img_front = imgs[:, 0]  # (B,3,H,W)
+            img_left  = imgs[:, 2]  # (B,3,H,W)
 
-            # ----- 前向 + 计算损失 -----
+            B, C, H, W = img_front.shape
+            overlap_ratio = float(getattr(g_cfg.data, 'overlap_ratio', 0.25))
+            overlap_px = max(1, int(W * overlap_ratio))
+            canvas_w = W + W - overlap_px # int
+
+            front_canvas = torch.zeros(B, C, H, canvas_w, device=device) # (B,3,H,canvas_w)
+            left_canvas  = torch.zeros(B, C, H, canvas_w, device=device) # (B,3,H,canvas_w)
+            front_canvas[..., W-overlap_px:] = img_front # 前视图放置在画布右侧
+            left_canvas[..., :W] = img_left # 左视图放置在画布左侧
+
+            mask_front = (front_canvas.sum(dim=1, keepdim=True) > 0).float() # (B,1,H,canvas_w)
+            mask_left  = (left_canvas.sum(dim=1,  keepdim=True) > 0).float() # (B,1,H,canvas_w)
+            mask_overlap = mask_front * mask_left # (B,1,H,canvas_w)
+
+            # -- 前向 + 计算损失 -----
             with torch.amp.autocast(device_type=device_type, enabled=use_amp):
-                outs = net(imgs[:, 0], imgs[:, 1])
-                # 按你的任务需要调整监督信号
-                loss = criterion(outs, imgs[:, 5])
+
+                outs = net(front_canvas, left_canvas) # (B,1,H,canvas_w)
+                out_img = stitch2img(front_canvas, left_canvas, outs) # (B,3,H,canvas_w)
+
+                # loss
+                loss = l_num_loss(out_img, front_canvas, mask_front, 1)
+                loss += l_num_loss(out_img, left_canvas, mask_left, 1)
+                left_learned_mask = outs * mask_left # (B,1,H,canvas_w)
+                loss += cal_smooth_term_stitch(out_img, left_learned_mask) * 1
+                loss += cal_smooth_term_diff(front_canvas, left_canvas, left_learned_mask, mask_overlap) * 1
+
+
+
 
             # ----- 反向传播 -----
             optimizer.zero_grad(set_to_none=True)

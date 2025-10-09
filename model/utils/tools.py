@@ -16,15 +16,35 @@ def count_params(model: torch.nn.Module) -> int:
 def format_secs(s: float) -> str:
     return str(dt.timedelta(seconds=int(s)))
 
-def ensure_tensor_imgs(batch):
-    """兼容 Dataset 返回 imgs 或 (imgs, path) 的情况；并做基本维度断言"""
-    if isinstance(batch, (list, tuple)):
-        imgs = batch[0]
-    else:
-        imgs = batch
-    assert imgs.dim() == 5, f"Expect imgs of shape [B, 6, C, H, W], got {tuple(imgs.shape)}"
-    return imgs
 
 def save_ckpt(state: dict, path: str):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     torch.save(state, path)
+
+import torch
+
+import torch
+
+def stitch2img(img_front, img_left, learned_mask)->torch.Tensor:
+    """
+    拼接两个输入图像（前视图、左视图）生成画布级别的 stitched 图像。
+    适用于 learned_mask 为画布宽度（即网络输入 front_canvas / left_canvas 时）的情况。
+
+    参数:
+        img_front: (B,3,H,canvas_w)           前视图
+        img_left:  (B,3,H,canvas_w)           左视图
+        learned_mask: (B, 1, H, canvas_w)  网络预测的融合权重 (Wc = W + W - overlap_px)
+        overlap_ratio: float,             重叠比例 (默认 0.25)
+
+    返回:
+        stitched_img: (B, 3, H, Wc)       拼接画布
+    """
+    # 初始化画布
+    stitched_img = torch.zeros_like(img_front).to(img_front.device).float()
+
+    stitched_img = img_left * learned_mask + img_front * (1 - learned_mask)
+
+    return stitched_img
+
+
+

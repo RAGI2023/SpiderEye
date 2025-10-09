@@ -91,13 +91,20 @@ def perspective_projection_diagfov(
     H, W = equirect.shape[:2]
     fov_d = math.radians(fov_diag_deg)
     diag = math.sqrt(out_w**2 + out_h**2)
-    z = (diag / 2.0) / math.tan(fov_d / 2.0)
 
     xs = np.linspace(-out_w/2, out_w/2, out_w, dtype=np.float32)
     ys = np.linspace(-out_h/2, out_h/2, out_h, dtype=np.float32)
     xv, yv = np.meshgrid(xs, ys)
 
-    dirs = np.stack([xv, -yv, np.full_like(xv, z)], axis=-1)
+    # 改为鱼眼投影模型：
+    r_norm = np.sqrt(xv**2 + yv**2)
+    theta = (r_norm / (diag / 2.0)) * (fov_d / 2.0)
+    dirs = np.stack([
+        np.sin(theta) * (xv / (r_norm + 1e-8)),
+        -np.sin(theta) * (yv / (r_norm + 1e-8)),
+        np.cos(theta)
+    ], axis=-1)
+
     dirs += np.array(translate, dtype=np.float32)
     dirs /= np.linalg.norm(dirs, axis=-1, keepdims=True)
 
@@ -160,12 +167,12 @@ if __name__ == "__main__":
     for name, (yaw, pitch, roll) in views.items():
         out = perspective_projection_diagfov(
             img,
-            fov_diag_deg=90,
+            fov_diag_deg=100,
             yaw_deg=yaw,
             pitch_deg=pitch,
             roll_deg=roll,
-            out_w=1920,
-            out_h=1080,
+            out_w=560,
+            out_h=560,
             jitter_cfg=cfg
         )
         cv.imwrite(f"runs/diagfov_output/{name}.png", out)

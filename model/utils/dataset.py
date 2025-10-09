@@ -2,7 +2,10 @@ from torch.utils.data import Dataset
 import os
 import torch
 import cv2
-from model.utils.equirect_utils import perspective_projection_diagfov
+try:
+    from model.utils.equirect_utils import perspective_projection_diagfov
+except ImportError:
+    from equirect_utils import perspective_projection_diagfov
 import numpy as np
 class ImageFolderDataset(Dataset):
     def __init__(self, folder_path, transform=None, jitter_cfg=None, **kwargs):
@@ -56,4 +59,23 @@ class ImageFolderDataset(Dataset):
 
         if self.transform:
             imgs = self.transform(imgs)
-        return imgs, img_path
+        return imgs
+
+if __name__ == "__main__":
+    from torch.utils.data import DataLoader
+    dataset = ImageFolderDataset(folder_path="../360SP-data/panoramas", fov=180, out_w=3000, out_h=3000)
+    print('Dataset length:', len(dataset))
+    loader = DataLoader(dataset, batch_size=1, shuffle=True, num_workers=4)
+    write_img = True
+
+    for i, imgs in enumerate(loader):
+        print('Batch', i, 'images shape:', imgs.shape)
+        if write_img:
+            dirname = 'runs/test_output/'
+            os.makedirs(dirname, exist_ok=True)
+            imgs = imgs.numpy()
+            for b in range(imgs.shape[0]):
+                for v in range(imgs.shape[1]):
+                    cv2.imwrite(f'{dirname}test_{i}_{b}_{v}.png', cv2.cvtColor((imgs[b,v]*255).astype(np.uint8).transpose(1,2,0), cv2.COLOR_RGB2BGR))
+        break # test one batch only
+    print('Data loading test completed.')

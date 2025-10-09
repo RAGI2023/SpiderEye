@@ -5,7 +5,8 @@ experiment:
 data:
   train_dataset: "/home/mg515/ragi/360SP-data/panoramas"
   fov: 130
-  sub_size: [1920, 1080]
+  patch_size: [640, 640]
+  overlap: 0.2
   jitter:
     random_seed: 1
     roll: 1.0
@@ -19,7 +20,7 @@ data:
 train:
   epochs: 50
   optimizer: "adam"
-  batch_size: 1
+  batch_size: 4
   lr: 1e-4
   num_workers: 4
 
