@@ -21,6 +21,7 @@ with open('configs/train.yaml') as f:
     g_cfg.train.batch_size = int(g_cfg.train.batch_size)
     g_cfg.train.epochs = int(g_cfg.train.epochs)
     g_cfg.train.num_workers = int(g_cfg.train.num_workers)
+    g_cfg.train.weight_decay = float(g_cfg.train.weight_decay)
 
 
 def setup_ddp():
@@ -83,11 +84,7 @@ def main():
     if rank == 0:
         print(f"Model params: {total_params/1e6:.2f}M")
 
-    optimizer = torch.optim.Adam(net.parameters(), lr=g_cfg.train.lr)
-
-    
-    use_amp = False
-    scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
+    optimizer = torch.optim.Adam(net.parameters(), lr=g_cfg.train.lr, weight_decay=g_cfg.train.weight_decay)
 
     num_epochs = g_cfg.train.epochs
     best_loss = float('inf')

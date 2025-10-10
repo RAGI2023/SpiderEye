@@ -24,6 +24,7 @@ train:
   lr: 1e-4
   num_workers: 4
   grad_clip: 3
+  weight_decay: 1e-4
 
 log:
   save_interval: 1
