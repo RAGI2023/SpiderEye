@@ -7,7 +7,7 @@ try:
 except ImportError:
     from equirect_utils import perspective_projection_diagfov, perspective_projection_diagfov_gpu
 import numpy as np
-class ImageFolderDataset(Dataset):
+class EquiDataset(Dataset):
     def __init__(self, folder_path, jitter_cfg=None, **kwargs):
         self.folder_path = folder_path
         self.jitter_cfg = jitter_cfg
@@ -79,7 +79,7 @@ class ImageFolderDataset(Dataset):
 
 if __name__ == "__main__":
     from torch.utils.data import DataLoader
-    dataset = ImageFolderDataset(folder_path="../360SP-data/panoramas", fov=180, out_w=640, out_h=640)
+    dataset = EquiDataset(folder_path="../360SP-data/panoramas", fov=180, out_w=640, out_h=640)
     print('Dataset length:', len(dataset))
     loader = DataLoader(dataset, batch_size=1, shuffle=True, num_workers=4)
     write_img = True

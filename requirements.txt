@@ -1,0 +1,7 @@
+torch==2.8.0
+torchvision==0.23.0
+pyyaml==6.0.3
+easydict==1.13
+tqdm==4.67.1
+tensorboard==2.20.0
+opencv_python==4.12.0

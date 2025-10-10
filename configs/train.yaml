@@ -26,6 +26,6 @@ train:
   grad_clip: 3
 
 log:
-  save_interval: 5
+  save_interval: 1
   log_interval: 100
 

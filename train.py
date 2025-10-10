@@ -9,7 +9,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
-from model.utils.dataset import ImageFolderDataset
+from model.utils.dataset import EquiDataset
 from model.network import SeamNet
 from model.utils.tools import *
 from model.loss import *
@@ -41,7 +41,7 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     # 数据集 & DataLoader
-    dataset = ImageFolderDataset(
+    dataset = EquiDataset(
         folder_path=g_cfg.data.train_dataset,
         fov=g_cfg.data.fov,
         out_w=g_cfg.data.patch_size[0],
