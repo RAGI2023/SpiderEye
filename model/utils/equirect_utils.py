@@ -3,6 +3,8 @@ import numpy as np
 import math
 import os
 import random
+import torch
+import torch.nn.functional as F
 
 # ==========================================================
 # 统一的默认扰动配置
@@ -135,6 +137,139 @@ def perspective_projection_diagfov(
         view = apply_lighting_jitter(view, light_cfg)
 
     return view
+
+import math
+import torch
+import torch.nn.functional as F
+import random
+import numpy as np
+
+# ---- 可选：光照扰动函数（PyTorch 实现版） ----
+def apply_lighting_jitter_torch(img, light_cfg):
+    """
+    对输入 torch 图像应用简单光照扰动（亮度/对比度/噪声）。
+    img: [B,3,H,W], 0~1 float
+    """
+    b, c, h, w = img.shape
+    out = img.clone()
+    if "brightness" in light_cfg:
+        br = light_cfg["brightness"]
+        delta = (torch.rand(b, 1, 1, 1, device=img.device) * 2 - 1) * br
+        out = out + delta
+    if "contrast" in light_cfg:
+        cr = light_cfg["contrast"]
+        factor = 1 + (torch.rand(b, 1, 1, 1, device=img.device) * 2 - 1) * cr
+        mean = out.mean(dim=(2,3), keepdim=True)
+        out = (out - mean) * factor + mean
+    if "noise" in light_cfg:
+        nr = light_cfg["noise"]
+        noise = torch.randn_like(out) * nr
+        out = out + noise
+    return out.clamp(0, 1)
+
+
+# ---- GPU 版本主函数 ----
+def perspective_projection_diagfov_gpu(
+    equirect, fov_diag_deg, yaw_deg, pitch_deg, roll_deg,
+    out_w=1024, out_h=1024, interpolation="bilinear",
+    translate=(0.0, 0.0, 0.0),
+    jitter_cfg=None,
+):
+    """
+    从 equirectangular 全景图中采样，生成给定【对角FOV】和朝向的视图（GPU 版本）
+    equirect: torch.Tensor, shape [B,3,H,W] or [3,H,W], float32, 0~1, CUDA
+    返回: torch.Tensor [B,3,out_h,out_w]
+    """
+
+    device = equirect.device
+    if equirect.dim() == 3:
+        equirect = equirect.unsqueeze(0)  # -> [1,3,H,W]
+    B, C, H, W = equirect.shape
+
+    if jitter_cfg is None:
+        jitter_cfg = {}
+
+    # 随机扰动配置
+    seed = jitter_cfg.get("random_seed", None)
+    if seed is not None:
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+
+    rot_jit = jitter_cfg.get("rotation_jitter", {})
+    trans_range = jitter_cfg.get("translate_range", 0.0)
+    light_cfg = jitter_cfg.get("lighting", {})
+
+    # 旋转扰动
+    yaw_deg += random.uniform(-rot_jit.get("yaw", 0.0), rot_jit.get("yaw", 0.0))
+    pitch_deg += random.uniform(-rot_jit.get("pitch", 0.0), rot_jit.get("pitch", 0.0))
+    roll_deg += random.uniform(-rot_jit.get("roll", 0.0), rot_jit.get("roll", 0.0))
+
+    # 平移扰动
+    tx, ty, tz = np.random.uniform(-trans_range, trans_range, 3)
+    translate = (tx, ty, tz)
+
+    # === 构建采样射线 ===
+    xs = torch.linspace(-out_w/2, out_w/2, out_w, device=device)
+    ys = torch.linspace(-out_h/2, out_h/2, out_h, device=device)
+    xv, yv = torch.meshgrid(ys, xs, indexing='xy') 
+    diag = math.sqrt(out_w**2 + out_h**2)
+    fov_d = math.radians(fov_diag_deg)
+
+    r_norm = torch.sqrt(xv**2 + yv**2)
+    theta = (r_norm / (diag/2)) * (fov_d/2)
+
+    dirs = torch.stack([
+        torch.sin(theta) * (xv / (r_norm + 1e-8)),
+        -torch.sin(theta) * (yv / (r_norm + 1e-8)),
+        torch.cos(theta)
+    ], dim=-1).type(torch.float32)  # [H,W,3]
+    dirs = dirs + torch.tensor(translate, device=device, dtype=torch.float32)
+    dirs = dirs / torch.norm(dirs, dim=-1, keepdim=True)
+
+    # === 构建旋转矩阵 ===
+    yaw, pitch, roll = map(math.radians, [yaw_deg, pitch_deg, roll_deg])
+    dtype = torch.float32
+
+    Rx = torch.tensor([[1,0,0],
+                    [0,math.cos(pitch),-math.sin(pitch)],
+                    [0,math.sin(pitch), math.cos(pitch)]],
+                    device=device, dtype=dtype)
+
+    Ry = torch.tensor([[math.cos(yaw),0,math.sin(yaw)],
+                    [0,1,0],
+                    [-math.sin(yaw),0,math.cos(yaw)]],
+                    device=device, dtype=dtype)
+
+    Rz = torch.tensor([[math.cos(roll),-math.sin(roll),0],
+                    [math.sin(roll), math.cos(roll),0],
+                    [0,0,1]],
+                    device=device, dtype=dtype)
+    R = Rz @ Rx @ Ry
+
+    dirs = dirs @ R.T
+
+    # === 转回 equirectangular 坐标 ===
+    X, Y, Z = dirs[..., 0], dirs[..., 1], dirs[..., 2]
+    theta = torch.atan2(X, Z)
+    phi = torch.asin(Y)
+
+    map_x = (theta + math.pi) / (2 * math.pi)
+    map_y = (math.pi/2 - phi) / math.pi
+
+    # grid_sample expects [-1,1]
+    grid = torch.stack([map_x*2 - 1, map_y*2 - 1], dim=-1)  # [H,W,2]
+    grid = grid.unsqueeze(0).repeat(B,1,1,1)
+
+    # === 采样 ===
+    mode = "bilinear" if interpolation == "bilinear" else "nearest"
+    out = F.grid_sample(equirect, grid, mode=mode, padding_mode='border', align_corners=False)
+
+    # === 光照扰动 ===
+    if light_cfg:
+        out = apply_lighting_jitter_torch(out, light_cfg)
+
+    return out
 
 
 # ==========================================================

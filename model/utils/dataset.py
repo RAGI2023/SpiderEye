@@ -3,12 +3,12 @@ import os
 import torch
 import cv2
 try:
-    from model.utils.equirect_utils import perspective_projection_diagfov
+    from model.utils.equirect_utils import perspective_projection_diagfov, perspective_projection_diagfov_gpu
 except ImportError:
-    from equirect_utils import perspective_projection_diagfov
+    from equirect_utils import perspective_projection_diagfov, perspective_projection_diagfov_gpu
 import numpy as np
 class ImageFolderDataset(Dataset):
-    def __init__(self, folder_path, transform=None, jitter_cfg=None, **kwargs):
+    def __init__(self, folder_path, jitter_cfg=None, **kwargs):
         self.folder_path = folder_path
         self.jitter_cfg = jitter_cfg
 
@@ -19,11 +19,12 @@ class ImageFolderDataset(Dataset):
         ]
         if len(self.image_files) == 0:
             raise ValueError(f"No image files found in {folder_path}.")
-        self.transform = transform
 
         self.fov = kwargs.get("fov", 130)
         self.out_w = kwargs.get("out_w", 1920)
         self.out_h = kwargs.get("out_h", 1080)
+
+        self.use_gpu = kwargs.get("use_gpu", True) and torch.cuda.is_available()
 
         self.VIEWS = {
             "front":  (  0,   0, 0),
@@ -41,29 +42,44 @@ class ImageFolderDataset(Dataset):
         img_path = self.image_files[idx]
         img = cv2.imread(img_path)
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        # imgs:(6, H, W, 3), [0,255]
-        imgs = [perspective_projection_diagfov(
-            img,
-            fov_diag_deg=self.fov,
-            yaw_deg=yaw,
-            pitch_deg=pitch,
-            roll_deg=roll,
-            out_w=self.out_w,
-            out_h=self.out_h,
-            jitter_cfg=self.jitter_cfg
-        ) for yaw, pitch, roll in self.VIEWS.values()]
-        # 转成 tensor
-        # imgs:(6, 3, H, W), [0,1]
-        imgs = np.stack(imgs, axis=0)
-        imgs = torch.from_numpy(imgs).permute(0, 3, 1, 2).float() / 255.0
+        if not self.use_gpu:
+            # imgs:(6, H, W, 3), [0,255]
+            imgs = [perspective_projection_diagfov(
+                img,
+                fov_diag_deg=self.fov,
+                yaw_deg=yaw,
+                pitch_deg=pitch,
+                roll_deg=roll,
+                out_w=self.out_w,
+                out_h=self.out_h,
+                jitter_cfg=self.jitter_cfg
+            ) for yaw, pitch, roll in self.VIEWS.values()]
+            # 转成 tensor
+            # imgs:(6, 3, H, W), [0,1]
+            imgs = np.stack(imgs, axis=0)
+            imgs = torch.from_numpy(imgs).permute(0, 3, 1, 2).float() / 255.0
 
-        if self.transform:
-            imgs = self.transform(imgs)
+        else:
+            # 转成 tensor 并搬到 GPU
+            img_tensor = torch.from_numpy(img).permute(2, 0, 1).unsqueeze(0).float() / 255.0  # (1,3,H,W), [0,1]
+            # imgs:(6, 3, H, W), [0,1]
+            imgs = [perspective_projection_diagfov_gpu(
+                img_tensor,
+                fov_diag_deg=self.fov,
+                yaw_deg=yaw,
+                pitch_deg=pitch,
+                roll_deg=roll,
+                out_w=self.out_w,
+                out_h=self.out_h,
+                jitter_cfg=self.jitter_cfg
+            ).squeeze(0) for yaw, pitch, roll in self.VIEWS.values()]
+            imgs = torch.stack(imgs, dim=0)  # (6,3,H,W)
+
         return imgs
 
 if __name__ == "__main__":
     from torch.utils.data import DataLoader
-    dataset = ImageFolderDataset(folder_path="../360SP-data/panoramas", fov=180, out_w=3000, out_h=3000)
+    dataset = ImageFolderDataset(folder_path="../360SP-data/panoramas", fov=180, out_w=640, out_h=640)
     print('Dataset length:', len(dataset))
     loader = DataLoader(dataset, batch_size=1, shuffle=True, num_workers=4)
     write_img = True

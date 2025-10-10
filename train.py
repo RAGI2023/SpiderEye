@@ -119,8 +119,8 @@ def main():
                 loss = l_num_loss(out_img, front_canvas, mask_front, 1)
                 loss += l_num_loss(out_img, left_canvas, mask_left, 1)
                 left_learned_mask = outs * mask_left # (B,1,H,canvas_w)
-                loss += cal_smooth_term_stitch(out_img, left_learned_mask) * 1
-                loss += cal_smooth_term_diff(front_canvas, left_canvas, left_learned_mask, mask_overlap) * 1
+                loss += cal_smooth_term_stitch(out_img, left_learned_mask) * 1e3
+                loss += cal_smooth_term_diff(front_canvas, left_canvas, left_learned_mask, mask_overlap) * 1e3
 
 
 
@@ -129,16 +129,19 @@ def main():
             optimizer.zero_grad(set_to_none=True)
             if scaler.is_enabled():
                 scaler.scale(loss).backward()
-                if getattr(g_cfg.train, 'grad_clip', None):
-                    scaler.unscale_(optimizer)
-                    nn.utils.clip_grad_norm_(net.parameters(), g_cfg.train.grad_clip)
+                scaler.unscale_(optimizer)
+
+                grad_clip_val = getattr(g_cfg.train, 'grad_clip', 3)
+                torch.nn.utils.clip_grad_norm_(net.parameters(), max_norm=grad_clip_val, norm_type=2)
+
                 scaler.step(optimizer)
                 scaler.update()
             else:
                 loss.backward()
-                if getattr(g_cfg.train, 'grad_clip', None):
-                    nn.utils.clip_grad_norm_(net.parameters(), g_cfg.train.grad_clip)
+                grad_clip_val = getattr(g_cfg.train, 'grad_clip', 3)
+                torch.nn.utils.clip_grad_norm_(net.parameters(), max_norm=grad_clip_val, norm_type=2)
                 optimizer.step()
+
 
             # 日志
             running_loss += loss.item()
@@ -205,7 +208,8 @@ def main():
             'avg_loss': avg_loss,
             'cfg': dict(g_cfg),
         }
-        save_ckpt(ckpt, os.path.join(ckpt_dir, 'latest.pth'))
+        if epoch % g_cfg.train.save_interval == 0 or (epoch == num_epochs - 1):
+            save_ckpt(ckpt, os.path.join(ckpt_dir, f'{epoch}.pth'))
         if avg_loss < best_loss:
             best_loss = avg_loss
             save_ckpt(ckpt, os.path.join(ckpt_dir, 'best.pth'))
