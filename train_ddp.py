@@ -138,7 +138,7 @@ def main():
             loss_smooth_diff   = cal_smooth_term_diff(front_canvas, left_canvas, left_learned_mask, mask_overlap)
 
             
-            loss = loss_front + loss_left + 1e1 * loss_smooth_stitch + 1e3 * loss_smooth_diff
+            loss = loss_front + loss_left + 1e1 * loss_smooth_stitch + 1e1 * loss_smooth_diff
 
             # ---------- Backward ----------
             optimizer.zero_grad(set_to_none=True)

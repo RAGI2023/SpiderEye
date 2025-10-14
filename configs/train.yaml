@@ -1,5 +1,5 @@
 experiment:
-  name: "stitch_cube_map"
+  name: "stitch_cube_map_small"
   seed: 1
 
 data:
