@@ -11,9 +11,9 @@ from torch.utils.data import DataLoader, DistributedSampler
 from torch.utils.tensorboard import SummaryWriter
 
 from model.utils.dataset import EquiDataset
-from model.network import SeamNet
+from model.SeamNet import SeamNet
 from model.utils.tools import *
-from model.loss import *
+from model.SeamNet_loss import *
 
 with open('configs/train.yaml') as f:
     g_cfg = edic(yaml.safe_load(f))
