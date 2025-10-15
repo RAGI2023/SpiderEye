@@ -2,11 +2,9 @@ from torch.utils.data import Dataset
 import os
 import torch
 import cv2
-try:
-    from model.utils.equirect_utils import perspective_projection_diagfov, perspective_projection_diagfov_gpu
-except ImportError:
-    from equirect_utils import perspective_projection_diagfov, perspective_projection_diagfov_gpu
+from equirect_utils import perspective_projection_fisheye
 import numpy as np
+
 class EquiDataset(Dataset):
     def __init__(self, folder_path, jitter_cfg=None, **kwargs):
         self.folder_path = folder_path
@@ -24,7 +22,7 @@ class EquiDataset(Dataset):
         self.out_w = kwargs.get("out_w", 1920)
         self.out_h = kwargs.get("out_h", 1080)
 
-        self.use_gpu = kwargs.get("use_gpu", True) and torch.cuda.is_available()
+        self.fisheye_params = kwargs.get("k", (0.08, -0.16, 0.35, -0.26))
 
         self.VIEWS = {
             "front":  (  0,   0, 0),
@@ -42,38 +40,24 @@ class EquiDataset(Dataset):
         img_path = self.image_files[idx]
         img = cv2.imread(img_path)
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        if not self.use_gpu:
-            # imgs:(6, H, W, 3), [0,255]
-            imgs = [perspective_projection_diagfov(
-                img,
-                fov_diag_deg=self.fov,
-                yaw_deg=yaw,
-                pitch_deg=pitch,
-                roll_deg=roll,
-                out_w=self.out_w,
-                out_h=self.out_h,
-                jitter_cfg=self.jitter_cfg
-            ) for yaw, pitch, roll in self.VIEWS.values()]
-            # 转成 tensor
-            # imgs:(6, 3, H, W), [0,1]
-            imgs = np.stack(imgs, axis=0)
-            imgs = torch.from_numpy(imgs).permute(0, 3, 1, 2).float() / 255.0
+        # imgs:(6, H, W, 3), [0,255]
+        imgs = [perspective_projection_fisheye(
+            img,
+            fov_diag_deg=self.fov,
+            yaw_deg=yaw,
+            pitch_deg=pitch,
+            roll_deg=roll,
+            out_w=self.out_w,
+            out_h=self.out_h,
+            jitter_cfg=self.jitter_cfg,
+            k=self.fisheye_params,
 
-        else:
-            # 转成 tensor 并搬到 GPU
-            img_tensor = torch.from_numpy(img).permute(2, 0, 1).unsqueeze(0).float() / 255.0  # (1,3,H,W), [0,1]
-            # imgs:(6, 3, H, W), [0,1]
-            imgs = [perspective_projection_diagfov_gpu(
-                img_tensor,
-                fov_diag_deg=self.fov,
-                yaw_deg=yaw,
-                pitch_deg=pitch,
-                roll_deg=roll,
-                out_w=self.out_w,
-                out_h=self.out_h,
-                jitter_cfg=self.jitter_cfg
-            ).squeeze(0) for yaw, pitch, roll in self.VIEWS.values()]
-            imgs = torch.stack(imgs, dim=0)  # (6,3,H,W)
+        ) for yaw, pitch, roll in self.VIEWS.values()]
+        # 转成 tensor
+        # imgs:(6, 3, H, W), [0,1]
+        imgs = np.stack(imgs, axis=0)
+        imgs = torch.from_numpy(imgs).permute(0, 3, 1, 2).float() / 255.0
+
 
         return imgs
 
