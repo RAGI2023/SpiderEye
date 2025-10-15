@@ -6,9 +6,10 @@ from equirect_utils import perspective_projection_fisheye
 import numpy as np
 
 class EquiDataset(Dataset):
-    def __init__(self, folder_path, jitter_cfg=None, **kwargs):
+    def __init__(self, folder_path, canvas_size=(1920, 960), jitter_cfg=None, **kwargs):
         self.folder_path = folder_path
         self.jitter_cfg = jitter_cfg
+        self.canvas_size = canvas_size
 
         self.image_files = [
             os.path.join(folder_path, f)
@@ -29,8 +30,8 @@ class EquiDataset(Dataset):
             "back":   (180,   0, 0),
             "left":   (-90,   0, 0),
             "right":  ( 90,   0, 0),
-            "top":    (  0,  90, 0),
-            "bottom": (  0, -90, 0),
+            # "top":    (  0,  90, 0),
+            # "bottom": (  0, -90, 0),
         }
 
     def __len__(self):
@@ -40,7 +41,7 @@ class EquiDataset(Dataset):
         img_path = self.image_files[idx]
         img = cv2.imread(img_path)
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        # imgs:(6, H, W, 3), [0,255]
+        # imgs:(4, H, W, 3), [0,255]
         imgs = [perspective_projection_fisheye(
             img,
             fov_diag_deg=self.fov,
@@ -53,19 +54,33 @@ class EquiDataset(Dataset):
             k=self.fisheye_params,
 
         ) for yaw, pitch, roll in self.VIEWS.values()]
+        
+        # each fisheye img size
+        view_size = self.canvas_size[0] // 2
+        view_interval = self.canvas_size[0] // 4
+        imgs = [cv2.resize(im, (view_size, view_size)) for im in imgs]
+        # put into canvas
+        outs = np.zeros((len(self.VIEWS), 3, self.canvas_size[1], self.canvas_size[0]), dtype=np.uint8) # [4, 3, H, W]
+        outs[0, :, :, :view_size] = imgs[0].transpose(2, 0, 1)  # front
+        outs[1, :, :, view_interval+1:1+view_interval+view_size] = imgs[3].transpose(2, 0, 1)  # right
+        outs[2, :, :, 2*view_interval:2*view_interval+1+view_size] = imgs[1].transpose(2, 0, 1)  # back
+        # special handling for left because of oversize
+        outs[3, :, :, 3*view_interval:] = imgs[2][:, :self.canvas_size[0]- (3*view_interval), :].transpose(2, 0, 1)
+        outs[3, :, :, :view_interval] = imgs[2][:, -(self.canvas_size[0]- (3*view_interval)):, :].transpose(2, 0, 1)
+
+
         # 转成 tensor
-        # imgs:(6, 3, H, W), [0,1]
-        imgs = np.stack(imgs, axis=0)
-        imgs = torch.from_numpy(imgs).permute(0, 3, 1, 2).float() / 255.0
+        # imgs:(4, 3, H, W), [0,1]
+        imgs = torch.from_numpy(outs).float() / 255.0
 
 
         return imgs
 
 if __name__ == "__main__":
     from torch.utils.data import DataLoader
-    dataset = EquiDataset(folder_path="../360SP-data/panoramas", fov=180, out_w=640, out_h=640)
+    dataset = EquiDataset(folder_path="../360SP-data/panoramas", fov=180, out_w=480, out_h=480)
     print('Dataset length:', len(dataset))
-    loader = DataLoader(dataset, batch_size=1, shuffle=True, num_workers=4)
+    loader = DataLoader(dataset, batch_size=1, shuffle=True, num_workers=1)
     write_img = True
 
     for i, imgs in enumerate(loader):
