@@ -65,7 +65,7 @@ class UNet(nn.Module):
         super().__init__()
         # Channel configuration (same as in the paper)
         c1, c2, c3, c4, c5, c6, c7, cf = 16, 32, 64, 128, 256, 256, 512, 32
-        self.N = 3  # Number of input views
+        self.N = 4  # Number of input views
 
         # ------- Encoder -------
         self.down1 = downconv_double(3, c1, 7)
