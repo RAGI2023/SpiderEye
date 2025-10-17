@@ -69,12 +69,12 @@ class EquiDataset(Dataset):
         imgs = [cv2.resize(im, (view_size, view_size)) for im in imgs]
         # put into canvas
         outs = np.zeros((len(self.VIEWS), 3, self.canvas_size[1], self.canvas_size[0]), dtype=np.uint8) # [4, 3, H, W]
-        outs[0, :, :, :view_size] = imgs[0].transpose(2, 0, 1)  # front
-        outs[1, :, :, view_interval+1:1+view_interval+view_size] = imgs[3].transpose(2, 0, 1)  # right
-        outs[2, :, :, 2*view_interval:2*view_interval+1+view_size] = imgs[1].transpose(2, 0, 1)  # back
+        outs[0, :, :, :view_size] = imgs[2].transpose(2, 0, 1)  # front
+        outs[1, :, :, view_interval+1:1+view_interval+view_size] = imgs[0].transpose(2, 0, 1)  # right
+        outs[2, :, :, 2*view_interval:2*view_interval+1+view_size] = imgs[3].transpose(2, 0, 1)  # back
         # special handling for left because of oversize
-        outs[3, :, :, 3*view_interval:] = imgs[2][:, :self.canvas_size[0]- (3*view_interval), :].transpose(2, 0, 1)
-        outs[3, :, :, :view_interval] = imgs[2][:, -(self.canvas_size[0]- (3*view_interval)):, :].transpose(2, 0, 1)
+        outs[3, :, :, 3*view_interval:] = imgs[1][:, :self.canvas_size[0]- (3*view_interval), :].transpose(2, 0, 1)
+        outs[3, :, :, :view_interval] = imgs[1][:, -(self.canvas_size[0]- (3*view_interval)):, :].transpose(2, 0, 1)
 
 
         # 转成 tensor
@@ -97,14 +97,22 @@ if __name__ == "__main__":
     loader = DataLoader(dataset, batch_size=1, shuffle=True, num_workers=1)
     write_img = True
 
-    for i, imgs in enumerate(loader):
+    for i, (imgs, img_original) in enumerate(loader):
         print('Batch', i, 'images shape:', imgs.shape)
         if write_img:
             dirname = 'runs/test_output/'
             os.makedirs(dirname, exist_ok=True)
             imgs = imgs.numpy()
             for b in range(imgs.shape[0]):
-                for v in range(imgs.shape[1]):
-                    cv2.imwrite(f'{dirname}test_{i}_{b}_{v}.png', cv2.cvtColor((imgs[b,v]*255).astype(np.uint8).transpose(1,2,0), cv2.COLOR_RGB2BGR))
-        break # test one batch only
+                for v, view in enumerate(dataset.VIEWS.keys()):
+                    cv2.imwrite(
+                        f'{dirname}test_{view}_{i}_{b}.png',
+                        cv2.cvtColor((imgs[b, v] * 255).astype(np.uint8).transpose(1, 2, 0), cv2.COLOR_RGB2BGR)
+                    )
+            cv2.imwrite(
+                f'{dirname}test_original_{i}.png',
+                cv2.cvtColor((img_original[0].numpy() * 255).astype(np.uint8).transpose(1, 2, 0), cv2.COLOR_RGB2BGR)
+            )
+        break  # 只测试一批
+
     print('Data loading test completed.')
