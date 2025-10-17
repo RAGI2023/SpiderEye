@@ -95,6 +95,7 @@ def main():
 
     log_interval = g_cfg.log.log_interval
     save_interval = g_cfg.log.save_interval
+    Lambda = g_cfg.train.Lambda
     
     if rank == 0:
         print("################## Start Training (FP32) #######################")
@@ -116,7 +117,9 @@ def main():
             # ---------- Forward ----------
             outs = net(imgs)
             # ---------- Loss ----------
-            loss = l_num_loss(outs, img_original, num=2)
+            loss_l2 = l_num_loss(outs, img_original, num=2)
+            loss_ssim = ssim_loss(outs, img_original, window_size=11, is_train=True)
+            loss = (1 - Lambda) * loss_l2 + Lambda * loss_ssim
 
             # ---------- Backward ----------
             optimizer.zero_grad(set_to_none=True)
@@ -129,6 +132,8 @@ def main():
             # ---------- TensorBoard ----------
             if rank == 0:
                 
+                writer.add_scalar("Loss/L2", loss_l2.item(), global_step)
+                writer.add_scalar("Loss/SSIM", loss_ssim.item(), global_step)
                 writer.add_scalar("Loss/Total", loss.item(), global_step)
 
                 # 写可视化图像
@@ -140,11 +145,12 @@ def main():
                     vis_left   = imgs[0,3].detach().cpu()
                     vis_out   = outs[0].detach().cpu().clamp(0, 1)
 
-                writer.add_images("Images/Front", vis_front.unsqueeze(0), global_step)
-                writer.add_images("Images/Left",  vis_left.unsqueeze(0),  global_step)
-                writer.add_images("Images/Back",  vis_back.unsqueeze(0),  global_step)
-                writer.add_images("Images/Right", vis_right.unsqueeze(0), global_step)
-                writer.add_images("Images/Output", vis_out.unsqueeze(0),  global_step)
+                    writer.add_images("Images/Front", vis_front.unsqueeze(0), global_step)
+                    writer.add_images("Images/Left",  vis_left.unsqueeze(0),  global_step)
+                    writer.add_images("Images/Back",  vis_back.unsqueeze(0),  global_step)
+                    writer.add_images("Images/Right", vis_right.unsqueeze(0), global_step)
+                    writer.add_images("Images/Output", vis_out.unsqueeze(0),  global_step)
+                    writer.add_images("Images/GroundTruth", img_original[0].detach().cpu().unsqueeze(0), global_step)
 
             global_step += 1
      

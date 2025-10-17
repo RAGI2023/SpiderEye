@@ -1,5 +1,5 @@
 experiment:
-  name: "stitch"
+  name: "stitch_ssim"
   seed: 1
 
 data:
@@ -9,22 +9,23 @@ data:
   overlap: 0.5
   jitter:
     random_seed: 1
-    roll: 1.0
-    pitch: 1.0
-    yaw: 1.0
-    translate: 0.5
-    brightness: 1e-1
-    contrast: 1e-2
-    color_jitter: 1e-2
+    roll: 0.0
+    pitch: 0.0
+    yaw: 0.0
+    translate: 0.0
+    brightness: 0
+    contrast: 0
+    color_jitter: 0
 
 train:
   epochs: 50
   optimizer: "adam"
   batch_size: 1
   lr: 1e-4
-  num_workers: 4
+  num_workers: 10
   grad_clip: 3
   weight_decay: 1e-4
+  Lambda: 0.9
 
 log:
   save_interval: 1
