@@ -76,7 +76,7 @@ def main():
     )
 
     if rank == 0:
-        print(f"Dataset size: {len(dataset)} | Batch size: {g_cfg.train.batch_size}")
+        print(f"Dataset size: {len(dataset)} | Batch size: {g_cfg.batch_size}")
 
     # ---------------- Model ----------------
     net = HomoDispNet(opt=g_cfg.model, device=device).to(device)
@@ -117,9 +117,9 @@ def main():
             # ---------- Forward ----------
             outs = net(imgs)
             # ---------- Loss ----------
-            loss_l2 = l_num_loss(outs, img_original, num=2)
+            loss_l_num = l_num_loss(outs, img_original, num=l_num)
             loss_ssim = ssim_loss(outs, img_original, window_size=11, is_train=True)
-            loss = (1 - Lambda) * loss_l2 + Lambda * loss_ssim
+            loss = (1 - Lambda) * loss_l_num + Lambda * loss_ssim
 
             # ---------- Backward ----------
             optimizer.zero_grad(set_to_none=True)
@@ -132,7 +132,7 @@ def main():
             # ---------- TensorBoard ----------
             if rank == 0:
                 
-                writer.add_scalar("Loss/L2", loss_l2.item(), global_step)
+                writer.add_scalar("Loss/L_num", loss_l_num.item(), global_step)
                 writer.add_scalar("Loss/SSIM", loss_ssim.item(), global_step)
                 writer.add_scalar("Loss/Total", loss.item(), global_step)
 
