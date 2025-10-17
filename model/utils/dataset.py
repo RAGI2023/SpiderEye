@@ -2,7 +2,10 @@ from torch.utils.data import Dataset
 import os
 import torch
 import cv2
-from equirect_utils import perspective_projection_fisheye
+try:
+    from equirect_utils import perspective_projection_fisheye
+except ImportError:
+    from model.utils.equirect_utils import perspective_projection_fisheye
 import numpy as np
 
 class EquiDataset(Dataset):
@@ -38,6 +41,11 @@ class EquiDataset(Dataset):
         return len(self.image_files)
 
     def __getitem__(self, idx):
+        """Get a batch of images for training.
+        Returns:
+            imgs: Tensor, [4, 3, H, W], [0,1] front, right, back, left
+            originally [3, H, W], [0,255]
+        """
         img_path = self.image_files[idx]
         img = cv2.imread(img_path)
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
@@ -73,8 +81,14 @@ class EquiDataset(Dataset):
         # imgs:(4, 3, H, W), [0,1]
         imgs = torch.from_numpy(outs).float() / 255.0
 
-
-        return imgs
+        #resize img
+        img_t = torch.from_numpy(img).permute(2, 0, 1).float() / 255.0  # [3, H, W]
+        # 2) interpolate 需要 4D，所以加 batch 维；size 接受 (H, W)
+        Hc, Wc = self.canvas_size[1], self.canvas_size[0]  # 注意翻转
+        img_original = torch.nn.functional.interpolate(
+            img_t.unsqueeze(0), size=(Hc, Wc), mode='bilinear', align_corners=False
+        ).squeeze(0).to(imgs.device)  # [3, Hc, Wc]
+        return imgs, img_original 
 
 if __name__ == "__main__":
     from torch.utils.data import DataLoader

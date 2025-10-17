@@ -4,8 +4,8 @@ import torch.nn.functional as F
 from torchvision import transforms
 import math
 
-from Unet.Unet import UNet
-from Regnet.Regnet import Regressor
+from model.Unet.Unet import UNet
+from model.Regnet.Regnet import Regressor
 
 # ==========================================================
 # E2E (includes BaseNet logic)
@@ -159,31 +159,55 @@ class HomoDispNet(MetaStitcher):
         super().__init__(opt, device)
         self.local_limit = self.opt.local_adj_limit  # if 0, No Local Adjustment
         self.local_adj_block = self.get_displace_block(16)
-    def forward(self, imgs):
-        return self.generate(imgs)
-    def generate(self, images: torch.Tensor) -> torch.Tensor:
+        
+    def forward(self, images: torch.Tensor) -> torch.Tensor:
         """
-        :param images: [input direction x B x C x H x W]
-        :return: Panorama Image [B x C x H x W]
+        Args:
+            images: [B, N, C, H, W]  # N = input_direction (views)
+        Returns:
+            panorama: [B, C, H, W]
         """
-        _, b, c, h, w = images.shape
-        iconv_1, downfeature = self.UNet(images)
+        B, N, C, H, W = images.shape
+        assert C == 3, f"expected 3 channels, got {C}"
+        # 将 input_direction 与实际 N 对齐
+        self.input_direction = N
 
-        weight = self.weight_block(iconv_1)
-        theta = self.Regressor(downfeature)  # theta: [Batch X homography * input_direction X 2 X 3]
-        disp = self.local_limit * self.local_adj_block(iconv_1)  # [B x 2 * homography * input_direction x H x W]
-        disp = disp.permute(0, 2, 3, 1)  # [B x H x W x 2 * homography * input_direction]
+        # UNet 已改为支持 [B, N, 3, H, W]
+        iconv_1, downfeature = self.UNet(images)    # iconv_1: [B, 16, H, W]
 
-        panorama = torch.zeros([b, c, h, w]).to(self.device)
+        # 生成每个方向/每个单应的权重 & 位姿参数
+        weight = self.weight_block(iconv_1)         # [B, homography*N, H, W]
+        theta  = self.Regressor(downfeature)        # [B, homography*N, 2, 3]
 
-        for i, img in enumerate(images):
-            start, end = i * self.homography, i * self.homography + self.homography
-            flow = self.flow_estimation(i, disp, theta[:, start: end, :, :], imgsize=[h, w])
-            flow = flow + disp[..., start * 2: end * 2]
-            warped_images = self.warp(flow, img)
-            panorama += self.weighted_sum(warped_images, weight[:, start: end, ...])
+        # 局部位移（disp） -> [B, H, W, 2*homography*N]
+        disp = self.local_limit * self.local_adj_block(iconv_1)  # [B, 2*h*N, H, W]
+        disp = disp.permute(0, 2, 3, 1).contiguous()
+
+        # 输出全景
+        panorama = torch.zeros([B, C, H, W], device=self.device, dtype=images.dtype)
+
+        for i in range(N):
+            # 取第 i 个视角的图像 [B, 3, H, W]
+            img_i = images[:, i, ...]
+            start, end = i * self.homography, (i + 1) * self.homography
+
+            # 估计 flow（注意：在 HomoDispNet.flow_estimation 里已经把 disp 的该方向切片加进去了）
+            flow = self.flow_estimation(
+                i,                      # direction
+                disp,                   # for picking adj slice inside
+                theta[:, start:end, :, :],  # thetas for this direction
+                imgsize=[H, W],
+            )  # -> [B, H, W, 2*homography]
+
+            # 对该方向的每个单应 warp（返回 [Homography, B, C, H, W]）
+            warped_images = self.warp(flow, img_i)
+
+            # 以该方向的权重进行融合
+            weight_i = weight[:, start:end, ...]     # [B, homography, H, W]
+            panorama += self.weighted_sum(warped_images, weight_i)
 
         return panorama
+
 
     def flow_estimation(self, direction: int, disp: torch.Tensor, *args, **kwargs):
         flow = super().flow_estimation(*args, **kwargs)

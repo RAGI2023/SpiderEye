@@ -112,17 +112,22 @@ class UNet(nn.Module):
         Forward pass of UNet.
 
         Args:
-            inputs: list of N input images, each of shape [B, 3, H, W]
+            inputs: Tensor of shape [B, N, 3, H, W]
             return_encoding (bool): if True, return both decoder output and encoding map
 
         Returns:
             out: decoder output (high-resolution feature map)
             encoding_map (optional): deep encoded multi-view representation
         """
-        # -------- Encode each input independently --------
-        features = [self.encode_single(img) for img in inputs]
 
-        # Concatenate features of all inputs per encoder layer
+        # -------- Encode each view independently --------
+        features = []
+        for i in range(self.N):
+            view = inputs[:, i]  # [B, 3, H, W]
+            feats = self.encode_single(view)
+            features.append(feats)
+
+        # -------- Concatenate features of all views per encoder layer --------
         cat_features = []
         for layer in range(7):
             cat_layer = torch.cat([f[layer] for f in features], dim=1)
@@ -153,16 +158,14 @@ class UNet(nn.Module):
         u1 = self.up1(u2)
         out = self.conv1(u1)
 
-        # Optionally return the encoding map
         if return_encoding:
             return out, encoding_map
         return out
 
-
 # =================== Quick test ===================
 if __name__ == "__main__":
     model = UNet()
-    imgs = [torch.randn(1, 3, 256, 512) for _ in range(3)]
+    imgs = torch.randn(2, 4, 3, 256, 512)  # [B, N, 3, H, W]
     out, enc = model(imgs, return_encoding=True)
     print("Decoder output shape:", out.shape)
     print("Encoding map shape:", enc.shape)
