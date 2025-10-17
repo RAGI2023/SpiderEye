@@ -116,7 +116,7 @@ def main():
             # ---------- Forward ----------
             outs = net(imgs)
             # ---------- Loss ----------
-            loss = l_num_loss(outs, img_original, num=1)
+            loss = l_num_loss(outs, img_original, num=2)
 
             # ---------- Backward ----------
             optimizer.zero_grad(set_to_none=True)
@@ -125,7 +125,6 @@ def main():
             optimizer.step()
 
             running_loss += loss.item()
-            global_step += 1
 
             # ---------- TensorBoard ----------
             if rank == 0:
@@ -139,13 +138,15 @@ def main():
                     vis_right  = imgs[0,1].detach().cpu()
                     vis_back   = imgs[0,2].detach().cpu()
                     vis_left   = imgs[0,3].detach().cpu()
-                    vis_out   = outs[0,0].detach().cpu().clamp(0, 1)
+                    vis_out   = outs[0].detach().cpu().clamp(0, 1)
 
-                    writer.add_images("Images/Front", vis_front, global_step)
-                    writer.add_images("Images/Left", vis_left, global_step)
-                    writer.add_images("Images/Back", vis_back, global_step)
-                    writer.add_images("Images/Right", vis_right, global_step)
-                    writer.add_images("Images/Output", vis_out, global_step)
+                writer.add_images("Images/Front", vis_front.unsqueeze(0), global_step)
+                writer.add_images("Images/Left",  vis_left.unsqueeze(0),  global_step)
+                writer.add_images("Images/Back",  vis_back.unsqueeze(0),  global_step)
+                writer.add_images("Images/Right", vis_right.unsqueeze(0), global_step)
+                writer.add_images("Images/Output", vis_out.unsqueeze(0),  global_step)
+
+            global_step += 1
      
 
             if rank == 0:
