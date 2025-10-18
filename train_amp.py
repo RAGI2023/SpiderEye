@@ -18,6 +18,7 @@ from model.utils.tools import *
 from model.loss import *
 
 
+# ------------------- Load Config -------------------
 with open('configs/train.yaml') as f:
     g_cfg = edic(yaml.safe_load(f))
     g_cfg.train.lr = float(g_cfg.train.lr)
@@ -28,6 +29,8 @@ with open('configs/train.yaml') as f:
     g_cfg.model.mean = tuple(map(float, g_cfg.model.mean.split(',')))
     g_cfg.model.std = tuple(map(float, g_cfg.model.std.split(',')))
 
+
+# ------------------- DDP Setup -------------------
 def setup_ddp():
     dist.init_process_group(backend="nccl")
     local_rank = int(os.environ["LOCAL_RANK"])
@@ -35,10 +38,12 @@ def setup_ddp():
     device = torch.device(f"cuda:{local_rank}")
     return device, local_rank
 
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('-c', '--continue_train', action='store_true', help="Continue training from latest checkpoint")
     return parser.parse_args()
+
 
 def get_latest_ckpt(ckpt_dir):
     ckpts = [
@@ -48,6 +53,8 @@ def get_latest_ckpt(ckpt_dir):
     ckpts = sorted(ckpts, key=os.path.getmtime)
     return ckpts[-1] if ckpts else None
 
+
+# ------------------- Main -------------------
 def main(args):
     device, local_rank = setup_ddp()
     rank = dist.get_rank()
@@ -58,7 +65,7 @@ def main(args):
 
     # 目录
     run_root = os.path.join('runs', g_cfg.experiment.name)
-    log_dir  = os.path.join(run_root, 'tb')
+    log_dir = os.path.join(run_root, 'tb')
     ckpt_dir = os.path.join(run_root, 'ckpts')
     if rank == 0:
         os.makedirs(log_dir, exist_ok=True)
@@ -91,33 +98,22 @@ def main(args):
     )
 
     if rank == 0:
-        hparams = {
-            'lr': g_cfg.train.lr,
-            'batch_size': g_cfg.train.batch_size,
-            'epochs': g_cfg.train.epochs,
-            'weight_decay': g_cfg.train.weight_decay,
-            'num_workers': g_cfg.train.num_workers,
-            'local_adj_limit': g_cfg.model.local_adj_limit,
-            'canvas_size': str(g_cfg.data.canvas_size),
-        }
-        writer.add_hparams(hparams, {})
-
-    if rank == 0:
         print(f"Dataset size: {len(dataset)} | Batch size: {g_cfg.train.batch_size}")
 
     # ---------------- Model ----------------
     net = HomoDispNet(opt=g_cfg.model, device=device)
-    net = torch.nn.SyncBatchNorm.convert_sync_batchnorm(net)  
-    # net = convert_bn_to_gn(net, max_groups=32)
+    # net = torch.nn.SyncBatchNorm.convert_sync_batchnorm(net)  # 分布式 BN
     net = net.to(device)
     net = nn.parallel.DistributedDataParallel(net, device_ids=[local_rank], output_device=local_rank)
 
     total_params = count_params(net)
-
     if rank == 0:
-        print(f"Model params: {total_params/1e6:.2f}M")
+        print(f"Model params: {total_params / 1e6:.2f}M")
 
     optimizer = torch.optim.Adam(net.parameters(), lr=g_cfg.train.lr, weight_decay=g_cfg.train.weight_decay)
+
+    # ----------- AMP 初始化 -----------
+    scaler = torch.cuda.amp.GradScaler()
 
     # ---------------- Resume if needed ----------------
     start_epoch = 0
@@ -143,17 +139,15 @@ def main(args):
     # ---------------- Train Loop ----------------
     num_epochs = g_cfg.train.epochs
     total_elapsed = 0.0
-
     log_interval = g_cfg.log.log_interval
-    save_interval = g_cfg.log.save_interval  # now step interval
+    save_interval = g_cfg.log.save_interval
     lambda1 = g_cfg.train.lambda1
     lambda2 = g_cfg.train.lambda2
-    l_num = g_cfg.train.l_num
 
     l1_charbonnier_loss = L1_Charbonnier_loss(eps=1e-6)
 
     if rank == 0:
-        print("################## Start Training (FP32) #######################")
+        print("################## Start Training (AMP enabled) #######################")
 
     for epoch in range(start_epoch, num_epochs):
         sampler.set_epoch(epoch)
@@ -161,7 +155,7 @@ def main(args):
         running_loss = 0.0
 
         if rank == 0:
-            pbar = tqdm(total=len(loader), desc=f"Epoch {epoch+1}/{num_epochs}", ncols=100)
+            pbar = tqdm(total=len(loader), desc=f"Epoch {epoch + 1}/{num_epochs}", ncols=100)
 
         net.train()
 
@@ -169,20 +163,22 @@ def main(args):
             imgs = imgs.to(device, non_blocking=True)
             img_original = img_original.to(device, non_blocking=True)
 
-            # ---------- Forward ----------
-            outs = net(imgs)
-
-            # ---------- Loss ----------
-            loss_l_num = l1_charbonnier_loss(outs, img_original)
-            loss_ssim = ssim_loss(outs, img_original, window_size=11, is_train=True)
-            loss_gradient = gradient_loss(outs, img_original)
-            loss = (1 - lambda1) * loss_l_num + lambda1 * loss_ssim + lambda2 * loss_gradient
-
-            # ---------- Backward ----------
             optimizer.zero_grad(set_to_none=True)
-            loss.backward()
+
+            # ---------- Forward + Loss (AMP) ----------
+            with torch.cuda.amp.autocast():
+                outs = net(imgs)
+                loss_l_num = l1_charbonnier_loss(outs, img_original)
+                loss_ssim = ssim_loss(outs, img_original, window_size=11, is_train=True)
+                loss_gradient = gradient_loss(outs, img_original)
+                loss = (1 - lambda1) * loss_l_num + lambda1 * loss_ssim + lambda2 * loss_gradient
+
+            # ---------- Backward (AMP) ----------
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(net.parameters(), max_norm=getattr(g_cfg.train, 'grad_clip', 3))
-            optimizer.step()
+            scaler.step(optimizer)
+            scaler.update()
 
             running_loss += loss.item()
 
@@ -194,32 +190,24 @@ def main(args):
                 writer.add_scalar("Loss/Total", loss.item(), global_step)
 
                 if global_step % log_interval == 0:
-                    vis_front = imgs[0,0].detach().cpu()
-                    vis_right = imgs[0,1].detach().cpu()
-                    vis_back  = imgs[0,2].detach().cpu()
-                    vis_left  = imgs[0,3].detach().cpu()
-                    vis_out   = outs[0].detach().cpu().clamp(0, 1)
+                    vis_front = imgs[0, 0].detach().cpu()
+                    vis_right = imgs[0, 1].detach().cpu()
+                    vis_back = imgs[0, 2].detach().cpu()
+                    vis_left = imgs[0, 3].detach().cpu()
+                    vis_out = outs[0].detach().cpu().clamp(0, 1)
                     writer.add_images("Images/Front", vis_front.unsqueeze(0), global_step)
-                    writer.add_images("Images/Left",  vis_left.unsqueeze(0),  global_step)
-                    writer.add_images("Images/Back",  vis_back.unsqueeze(0),  global_step)
+                    writer.add_images("Images/Left", vis_left.unsqueeze(0), global_step)
+                    writer.add_images("Images/Back", vis_back.unsqueeze(0), global_step)
                     writer.add_images("Images/Right", vis_right.unsqueeze(0), global_step)
-                    writer.add_images("Images/Output", vis_out.unsqueeze(0),  global_step)
+                    writer.add_images("Images/Output", vis_out.unsqueeze(0), global_step)
                     writer.add_images("Images/GroundTruth", img_original[0].detach().cpu().unsqueeze(0), global_step)
 
-                    # weights
                     if net.module.weights is not None:
-                        weight_vis = net.module.weights[0]  # [homography*N, H, W]
-                        # homography=1
+                        weight_vis = net.module.weights[0]
                         for idx in range(weight_vis.shape[0]):
                             writer.add_image(f"Weights/Direction_{idx}", weight_vis[idx].unsqueeze(0), global_step)
-                        
-                    if net.module.record_warped and net.module.warped is not None:
-                        # net.module.warped: list of length N, each is [homography, B, C, H, W]
-                        for dir_idx, warped_imgs in enumerate(net.module.warped):
-                            writer.add_image(f"Warped/Direction_{dir_idx}", warped_imgs, global_step)
-                        
 
-            # ---------- Save ckpt per step ----------
+            # ---------- Save ckpt ----------
             if rank == 0 and global_step % save_interval == 0 and global_step > 0:
                 ckpt = {
                     'epoch': epoch + 1,
@@ -266,7 +254,7 @@ def main(args):
                 best_loss = avg_loss
                 save_ckpt(ckpt, os.path.join(ckpt_dir, 'best.pth'))
 
-            print(f"✅ Epoch {epoch+1}/{num_epochs} | AvgLoss: {avg_loss:.4f} | "
+            print(f"✅ Epoch {epoch + 1}/{num_epochs} | AvgLoss: {avg_loss:.4f} | "
                   f"Time: {format_secs(epoch_time)} | Best: {best_loss:.4f}")
 
     if rank == 0:

@@ -118,7 +118,10 @@ class MetaStitcher(nn.Module):
         return torch.stack(warped_list)  # [Homography, B, C, H, W]
 
     def weighted_sum(self, images, weights):
-        """Blend warped images according to weights"""
+        """Blend warped images according to weights
+        images: [Homography, B, C, H, W]
+        weights: [B, homography, H, W]
+        """
         _, *size = images.shape
         output = torch.zeros(size).to(self.device)
         for i, img in enumerate(images):
@@ -160,6 +163,8 @@ class HomoDispNet(MetaStitcher):
         self.local_limit = self.opt.local_adj_limit  # if 0, No Local Adjustment
         self.local_adj_block = self.get_displace_block(16)
         self.record_weights = opt.get('record_weights', False)
+        self.record_warped = opt.get('record_warped', False)
+        self.warped = None
         self.weights = None
         
     def forward(self, images: torch.Tensor) -> torch.Tensor:
@@ -189,7 +194,7 @@ class HomoDispNet(MetaStitcher):
 
         # 输出全景
         panorama = torch.zeros([B, C, H, W], device=self.device, dtype=images.dtype)
-
+        self.warped = []  # for recording warped images if needed
         for i in range(N):
             # 取第 i 个视角的图像 [B, 3, H, W]
             img_i = images[:, i, ...]
@@ -205,7 +210,8 @@ class HomoDispNet(MetaStitcher):
 
             # 对该方向的每个单应 warp（返回 [Homography, B, C, H, W]）
             warped_images = self.warp(flow, img_i)
-
+            if self.record_warped:
+                self.warped.append(warped_images[0][0].detach().cpu()) # [C, H, W]]
             # 以该方向的权重进行融合
             weight_i = weight[:, start:end, ...]     # [B, homography, H, W]
             panorama += self.weighted_sum(warped_images, weight_i)
