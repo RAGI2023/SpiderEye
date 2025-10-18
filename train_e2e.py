@@ -94,8 +94,12 @@ def main(args):
         print(f"Dataset size: {len(dataset)} | Batch size: {g_cfg.train.batch_size}")
 
     # ---------------- Model ----------------
-    net = HomoDispNet(opt=g_cfg.model, device=device).to(device)
+    net = HomoDispNet(opt=g_cfg.model, device=device)
+    # net = torch.nn.SyncBatchNorm.convert_sync_batchnorm(net)  
+    net = convert_bn_to_gn(net, max_groups=32)
+    net = net.to(device)
     net = nn.parallel.DistributedDataParallel(net, device_ids=[local_rank], output_device=local_rank)
+
     total_params = count_params(net)
 
     if rank == 0:
@@ -130,8 +134,11 @@ def main(args):
 
     log_interval = g_cfg.log.log_interval
     save_interval = g_cfg.log.save_interval  # now step interval
-    Lambda = g_cfg.train.Lambda
+    lambda1 = g_cfg.train.lambda1
+    lambda2 = g_cfg.train.lambda2
     l_num = g_cfg.train.l_num
+
+    l1_charbonnier_loss = L1_Charbonnier_loss(eps=1e-6)
 
     if rank == 0:
         print("################## Start Training (FP32) #######################")
@@ -154,9 +161,10 @@ def main(args):
             outs = net(imgs)
 
             # ---------- Loss ----------
-            loss_l_num = l_num_loss(outs, img_original, num=l_num)
+            loss_l_num = l1_charbonnier_loss(outs, img_original)
             loss_ssim = ssim_loss(outs, img_original, window_size=11, is_train=True)
-            loss = (1 - Lambda) * loss_l_num + Lambda * loss_ssim
+            loss_gradient = gradient_loss(outs, img_original)
+            loss = (1 - lambda1) * loss_l_num + lambda1 * loss_ssim + lambda2 * loss_gradient
 
             # ---------- Backward ----------
             optimizer.zero_grad(set_to_none=True)
@@ -170,6 +178,7 @@ def main(args):
             if rank == 0:
                 writer.add_scalar("Loss/L_num", loss_l_num.item(), global_step)
                 writer.add_scalar("Loss/SSIM", loss_ssim.item(), global_step)
+                writer.add_scalar("Loss/Gradient", loss_gradient.item(), global_step)
                 writer.add_scalar("Loss/Total", loss.item(), global_step)
 
                 if global_step % log_interval == 0:
@@ -184,6 +193,16 @@ def main(args):
                     writer.add_images("Images/Right", vis_right.unsqueeze(0), global_step)
                     writer.add_images("Images/Output", vis_out.unsqueeze(0),  global_step)
                     writer.add_images("Images/GroundTruth", img_original[0].detach().cpu().unsqueeze(0), global_step)
+
+                    # weights
+                    if net.module.weights is not None:
+                        weight_vis = net.module.weights[0]  # [homography*N, H, W]
+                        # homography=1
+                        for idx in range(weight_vis.shape[0]):
+                            writer.add_image(f"Weights/Direction_{idx}", weight_vis[idx].unsqueeze(0), global_step)
+                        
+
+                        
 
             # ---------- Save ckpt per step ----------
             if rank == 0 and global_step % save_interval == 0 and global_step > 0:

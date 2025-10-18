@@ -2,6 +2,7 @@ import random
 import torch
 import os
 import datetime as dt
+import torch.nn as nn
 
 def set_seed(seed: int):
     random.seed(seed)
@@ -47,4 +48,22 @@ def stitch2img(img_front, img_left, learned_mask)->torch.Tensor:
     return stitched_img
 
 
-
+def convert_bn_to_gn(module, max_groups=32):
+    """Recursively replace all BatchNorm2d with GroupNorm intelligently."""
+    for name, m in module.named_children():
+        if isinstance(m, nn.BatchNorm2d):
+            c = m.num_features
+            # 自动找出能整除的最优 group 数
+            g = min(max_groups, c)
+            while c % g != 0 and g > 1:
+                g -= 1
+            # 如果通道太小（如3），跳过或转 InstanceNorm
+            if c < 8:
+                print(f"[convert_bn_to_gn] Small channel ({c}), using InstanceNorm2d.")
+                new_m = nn.InstanceNorm2d(c, affine=True)
+            else:
+                new_m = nn.GroupNorm(g, c)
+            setattr(module, name, new_m)
+        else:
+            convert_bn_to_gn(m, max_groups)
+    return module

@@ -159,6 +159,8 @@ class HomoDispNet(MetaStitcher):
         super().__init__(opt, device)
         self.local_limit = self.opt.local_adj_limit  # if 0, No Local Adjustment
         self.local_adj_block = self.get_displace_block(16)
+        self.record_weights = opt.get('record_weights', False)
+        self.weights = None
         
     def forward(self, images: torch.Tensor) -> torch.Tensor:
         """
@@ -177,6 +179,8 @@ class HomoDispNet(MetaStitcher):
 
         # 生成每个方向/每个单应的权重 & 位姿参数
         weight = self.weight_block(iconv_1)         # [B, homography*N, H, W]
+        if self.record_weights:
+            self.weights = weight.detach().cpu()
         theta  = self.Regressor(downfeature)        # [B, homography*N, 2, 3]
 
         # 局部位移（disp） -> [B, H, W, 2*homography*N]

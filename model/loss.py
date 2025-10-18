@@ -107,3 +107,42 @@ def ssim_loss(img1, img2, window_size=11, size_average=True, is_train=False):
     else:
         return _ssim(img1, img2, window, window_size, channel, size_average)
 
+class L1_Charbonnier_loss(torch.nn.Module):
+    """L1 Charbonnierloss."""
+    def __init__(self, eps=1e-6):
+        super(L1_Charbonnier_loss, self).__init__()
+        self.eps = eps
+
+    def forward(self, X, Y):
+        diff = torch.add(X, -Y)
+        error = torch.sqrt(diff * diff + self.eps)
+        loss = torch.mean(error)
+        return loss
+
+def gradient_loss(pred, target):
+    """Compute gradient-based loss (edge consistency)."""
+    # 1. 定义 Sobel 核
+    sobel_x = torch.tensor([[[[-1, 0, 1],
+                              [-2, 0, 2],
+                              [-1, 0, 1]]]], dtype=torch.float32)
+    sobel_y = torch.tensor([[[[-1, -2, -1],
+                              [ 0,  0,  0],
+                              [ 1,  2,  1]]]], dtype=torch.float32)
+
+    # 2. 复制到所有通道
+    C = pred.shape[1]
+    sobel_x = sobel_x.repeat(C, 1, 1, 1).to(pred.device)
+    sobel_y = sobel_y.repeat(C, 1, 1, 1).to(pred.device)
+
+    # 3. 计算梯度
+    gx_pred = F.conv2d(pred, sobel_x, padding=1, groups=C)
+    gy_pred = F.conv2d(pred, sobel_y, padding=1, groups=C)
+    gx_tgt  = F.conv2d(target, sobel_x, padding=1, groups=C)
+    gy_tgt  = F.conv2d(target, sobel_y, padding=1, groups=C)
+
+    # 4. 用 Charbonnier 或 L1 计算差异
+    diff_x = torch.abs(gx_pred - gx_tgt)
+    diff_y = torch.abs(gy_pred - gy_tgt)
+    grad_loss = (diff_x + diff_y).mean()
+
+    return grad_loss

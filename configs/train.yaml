@@ -1,5 +1,5 @@
 experiment:
-  name: "stitch_ssim_0.4"
+  name: "stitch_ssim_gra"
   seed: 1
 
 data:
@@ -21,11 +21,12 @@ train:
   epochs: 50
   optimizer: "adam"
   batch_size: 1
-  lr: 1e-5
+  lr: 1e-4
   num_workers: 10
   grad_clip: 3
   weight_decay: 1e-4
-  Lambda: 0.4
+  lambda1: 0.4
+  lambda2: 0.1
   l_num: 1
 log:
   save_interval: 100
@@ -35,4 +36,5 @@ model:
   homography: 1
   mean: 0.5, 0.5, 0.5
   std: 0.5, 0.5, 0.5
-  local_adj_limit: 0
+  local_adj_limit: 5
+  record_weights: true
