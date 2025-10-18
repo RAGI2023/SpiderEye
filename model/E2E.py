@@ -180,8 +180,8 @@ class HomoDispNet(MetaStitcher):
         theta  = self.Regressor(downfeature)        # [B, homography*N, 2, 3]
 
         # 局部位移（disp） -> [B, H, W, 2*homography*N]
-        disp = self.local_limit * self.local_adj_block(iconv_1)  # [B, 2*h*N, H, W]
-        disp = disp.permute(0, 2, 3, 1).contiguous()
+        disp = self.local_limit * self.local_adj_block(iconv_1)  
+        disp = disp.permute(0, 2, 3, 1).contiguous() # [B, 2*h*N, H, W]
 
         # 输出全景
         panorama = torch.zeros([B, C, H, W], device=self.device, dtype=images.dtype)

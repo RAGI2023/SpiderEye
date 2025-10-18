@@ -1,6 +1,8 @@
 import os
 import time
 import yaml
+import argparse
+from glob import glob
 from easydict import EasyDict as edic
 from tqdm import tqdm
 
@@ -33,7 +35,20 @@ def setup_ddp():
     device = torch.device(f"cuda:{local_rank}")
     return device, local_rank
 
-def main():
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-c', '--continue_train', action='store_true', help="Continue training from latest checkpoint")
+    return parser.parse_args()
+
+def get_latest_ckpt(ckpt_dir):
+    ckpts = [
+        f for f in glob(os.path.join(ckpt_dir, "*.pth"))
+        if not os.path.basename(f).startswith("best")
+    ]
+    ckpts = sorted(ckpts, key=os.path.getmtime)
+    return ckpts[-1] if ckpts else None
+
+def main(args):
     device, local_rank = setup_ddp()
     rank = dist.get_rank()
     world_size = dist.get_world_size()
@@ -76,31 +91,52 @@ def main():
     )
 
     if rank == 0:
-        print(f"Dataset size: {len(dataset)} | Batch size: {g_cfg.batch_size}")
+        print(f"Dataset size: {len(dataset)} | Batch size: {g_cfg.train.batch_size}")
 
     # ---------------- Model ----------------
     net = HomoDispNet(opt=g_cfg.model, device=device).to(device)
     net = nn.parallel.DistributedDataParallel(net, device_ids=[local_rank], output_device=local_rank)
-
     total_params = count_params(net)
+
     if rank == 0:
         print(f"Model params: {total_params/1e6:.2f}M")
 
     optimizer = torch.optim.Adam(net.parameters(), lr=g_cfg.train.lr, weight_decay=g_cfg.train.weight_decay)
 
-    num_epochs = g_cfg.train.epochs
-    best_loss = float('inf')
-    total_elapsed = 0.0
+    # ---------------- Resume if needed ----------------
+    start_epoch = 0
     global_step = 0
+    best_loss = float('inf')
+
+    if args.continue_train:
+        latest_ckpt = get_latest_ckpt(ckpt_dir)
+        if latest_ckpt:
+            if rank == 0:
+                print(f"🔄 Loading latest checkpoint: {latest_ckpt}")
+            map_location = {'cuda:%d' % 0: 'cuda:%d' % local_rank}
+            torch.serialization.add_safe_globals([edic])
+            ckpt = torch.load(latest_ckpt, map_location=map_location, weights_only=False)
+            net.module.load_state_dict(ckpt['model'])
+            optimizer.load_state_dict(ckpt['optimizer'])
+            start_epoch = ckpt.get('epoch', 0)
+            global_step = ckpt.get('global_step', 0)
+            best_loss = ckpt.get('avg_loss', float('inf'))
+            if rank == 0:
+                print(f"✅ Resumed from epoch {start_epoch}, step {global_step}")
+
+    # ---------------- Train Loop ----------------
+    num_epochs = g_cfg.train.epochs
+    total_elapsed = 0.0
 
     log_interval = g_cfg.log.log_interval
-    save_interval = g_cfg.log.save_interval
+    save_interval = g_cfg.log.save_interval  # now step interval
     Lambda = g_cfg.train.Lambda
-    
+    l_num = g_cfg.train.l_num
+
     if rank == 0:
         print("################## Start Training (FP32) #######################")
 
-    for epoch in range(num_epochs):
+    for epoch in range(start_epoch, num_epochs):
         sampler.set_epoch(epoch)
         epoch_start = time.perf_counter()
         running_loss = 0.0
@@ -111,11 +147,12 @@ def main():
         net.train()
 
         for i, (imgs, img_original) in enumerate(loader):
-            imgs = imgs.to(device, non_blocking=True)  # imgs:(B,6,3,H,W)
-            img_original = img_original.to(device, non_blocking=True)  # GT 标签
+            imgs = imgs.to(device, non_blocking=True)
+            img_original = img_original.to(device, non_blocking=True)
 
             # ---------- Forward ----------
             outs = net(imgs)
+
             # ---------- Loss ----------
             loss_l_num = l_num_loss(outs, img_original, num=l_num)
             loss_ssim = ssim_loss(outs, img_original, window_size=11, is_train=True)
@@ -131,20 +168,16 @@ def main():
 
             # ---------- TensorBoard ----------
             if rank == 0:
-                
                 writer.add_scalar("Loss/L_num", loss_l_num.item(), global_step)
                 writer.add_scalar("Loss/SSIM", loss_ssim.item(), global_step)
                 writer.add_scalar("Loss/Total", loss.item(), global_step)
 
-                # 写可视化图像
                 if global_step % log_interval == 0:
-                    # 只取 batch 的前 1 张
                     vis_front = imgs[0,0].detach().cpu()
-                    vis_right  = imgs[0,1].detach().cpu()
-                    vis_back   = imgs[0,2].detach().cpu()
-                    vis_left   = imgs[0,3].detach().cpu()
+                    vis_right = imgs[0,1].detach().cpu()
+                    vis_back  = imgs[0,2].detach().cpu()
+                    vis_left  = imgs[0,3].detach().cpu()
                     vis_out   = outs[0].detach().cpu().clamp(0, 1)
-
                     writer.add_images("Images/Front", vis_front.unsqueeze(0), global_step)
                     writer.add_images("Images/Left",  vis_left.unsqueeze(0),  global_step)
                     writer.add_images("Images/Back",  vis_back.unsqueeze(0),  global_step)
@@ -152,8 +185,19 @@ def main():
                     writer.add_images("Images/Output", vis_out.unsqueeze(0),  global_step)
                     writer.add_images("Images/GroundTruth", img_original[0].detach().cpu().unsqueeze(0), global_step)
 
+            # ---------- Save ckpt per step ----------
+            if rank == 0 and global_step % save_interval == 0 and global_step > 0:
+                ckpt = {
+                    'epoch': epoch + 1,
+                    'model': net.module.state_dict(),
+                    'optimizer': optimizer.state_dict(),
+                    'avg_loss': loss.item(),
+                    'cfg': dict(g_cfg),
+                    'global_step': global_step,
+                }
+                save_ckpt(ckpt, os.path.join(ckpt_dir, f'step_{global_step}.pth'))
+
             global_step += 1
-     
 
             if rank == 0:
                 pbar.update(1)
@@ -170,7 +214,7 @@ def main():
         epoch_time = time.perf_counter() - epoch_start
         total_elapsed += epoch_time
 
-        # ---------- Checkpoint ----------
+        # ---------- Epoch Summary ----------
         if rank == 0:
             epoch_ips = (len(dataset) / epoch_time)
             writer.add_scalar('Train/Epoch_Loss', avg_loss, epoch)
@@ -182,9 +226,8 @@ def main():
                 'optimizer': optimizer.state_dict(),
                 'avg_loss': avg_loss,
                 'cfg': dict(g_cfg),
+                'global_step': global_step,
             }
-            if epoch % save_interval == 0 or (epoch == num_epochs - 1):
-                save_ckpt(ckpt, os.path.join(ckpt_dir, f'{epoch}.pth'))
             if avg_loss < best_loss:
                 best_loss = avg_loss
                 save_ckpt(ckpt, os.path.join(ckpt_dir, 'best.pth'))
@@ -195,8 +238,11 @@ def main():
     if rank == 0:
         writer.close()
         print(f"Training done. Total time: {format_secs(total_elapsed)}")
+
     dist.destroy_process_group()
 
 
+# ------------------- Entry -------------------
 if __name__ == '__main__':
-    main()
+    args = parse_args()
+    main(args)
