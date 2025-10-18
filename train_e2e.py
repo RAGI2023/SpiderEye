@@ -25,6 +25,7 @@ with open('configs/train.yaml') as f:
     g_cfg.train.epochs = int(g_cfg.train.epochs)
     g_cfg.train.num_workers = int(g_cfg.train.num_workers)
     g_cfg.train.weight_decay = float(g_cfg.train.weight_decay)
+    g_cfg.train.beta = float(g_cfg.train.beta)
     g_cfg.model.mean = tuple(map(float, g_cfg.model.mean.split(',')))
     g_cfg.model.std = tuple(map(float, g_cfg.model.std.split(',')))
 
@@ -149,6 +150,8 @@ def main(args):
     lambda1 = g_cfg.train.lambda1
     lambda2 = g_cfg.train.lambda2
     l_num = g_cfg.train.l_num
+    use_kl = g_cfg.model.get('kl', False)
+    beta = g_cfg.train.beta
 
     l1_charbonnier_loss = L1_Charbonnier_loss(eps=1e-6)
 
@@ -170,13 +173,17 @@ def main(args):
             img_original = img_original.to(device, non_blocking=True)
 
             # ---------- Forward ----------
-            outs = net(imgs)
+            outs, mu, logvar = net(imgs)
 
             # ---------- Loss ----------
             loss_l_num = l1_charbonnier_loss(outs, img_original)
             loss_ssim = ssim_loss(outs, img_original, window_size=11, is_train=True)
             loss_gradient = gradient_loss(outs, img_original)
-            loss = (1 - lambda1) * loss_l_num + lambda1 * loss_ssim + lambda2 * loss_gradient
+            if use_kl:
+                kl_loss = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
+                loss = (1 - lambda1) * loss_l_num + lambda1 * loss_ssim + lambda2 * loss_gradient + l_num * kl_loss * beta
+            else:
+                loss = (1 - lambda1) * loss_l_num + lambda1 * loss_ssim + lambda2 * loss_gradient
 
             # ---------- Backward ----------
             optimizer.zero_grad(set_to_none=True)
@@ -191,6 +198,8 @@ def main(args):
                 writer.add_scalar("Loss/L_num", loss_l_num.item(), global_step)
                 writer.add_scalar("Loss/SSIM", loss_ssim.item(), global_step)
                 writer.add_scalar("Loss/Gradient", loss_gradient.item(), global_step)
+                if use_kl:
+                    writer.add_scalar("Loss/KL", kl_loss.item(), global_step)
                 writer.add_scalar("Loss/Total", loss.item(), global_step)
 
                 if global_step % log_interval == 0:

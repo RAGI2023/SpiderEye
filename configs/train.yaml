@@ -1,5 +1,5 @@
 experiment:
-  name: "stitch_ssim_gra"
+  name: "stitch_ssim_gra_kl"
   seed: 1
 
 data:
@@ -28,6 +28,7 @@ train:
   lambda1: 0.2
   lambda2: 0.1
   l_num: 1
+  beta: 1e-3
 log:
   save_interval: 100
   log_interval: 10
@@ -39,3 +40,4 @@ model:
   local_adj_limit: 0
   record_weights: true
   record_warped: true
+  kl: true
