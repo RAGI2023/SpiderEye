@@ -1,4 +1,4 @@
-import os,
+import os
 import time
 import yaml
 import argparse
@@ -176,7 +176,8 @@ def main(args):
             outs, mu, logvar = net(imgs)
 
             # ---------- Loss ----------
-            loss_l_num = l1_charbonnier_loss(outs, img_original)
+            # loss_l_num = l1_charbonnier_loss(outs, img_original)
+            loss_l_num = l_num_loss(outs, img_original, num=l_num)
             loss_ssim = ssim_loss(outs, img_original, window_size=11, is_train=True)
             loss_gradient = gradient_loss(outs, img_original)
             loss_affine = affine_loss(net.module.theta)
