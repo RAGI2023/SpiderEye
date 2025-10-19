@@ -184,7 +184,7 @@ class HomoDispNet(MetaStitcher):
         assert C == 3, f"expected 3 channels, got {C}"
         # 将 input_direction 与实际 N 对齐
         self.input_direction = N
-
+        
         # UNet 已改为支持 [B, N, 3, H, W]
         iconv_1, downfeature = self.UNet(images)    # iconv_1: [B, 16, H, W]
 
@@ -198,6 +198,9 @@ class HomoDispNet(MetaStitcher):
             theta  = self.Regressor(z)        # [B, homography*N, 2, 3]
         else:
             theta  = self.Regressor(downfeature)        # [B, homography*N, 2, 3]
+        
+        self.theta = theta  # for loss computation
+        self.disp = []
 
         # 生成每个方向/每个单应的权重 & 位姿参数
         weight = self.weight_block(iconv_1)         # [B, homography*N, H, W]
@@ -225,10 +228,12 @@ class HomoDispNet(MetaStitcher):
                 imgsize=[H, W],
             )  # -> [B, H, W, 2*homography]
 
+            self.disp.append(flow) # for loss computation
+
             # 对该方向的每个单应 warp（返回 [Homography, B, C, H, W]）
             warped_images = self.warp(flow, img_i)
             if self.record_warped:
-                self.warped.append(warped_images[0][0].detach().cpu()) # [C, H, W]]
+                self.warped.append(warped_images[0][0].detach().cpu()) # [C, H, W]
             # 以该方向的权重进行融合
             weight_i = weight[:, start:end, ...]     # [B, homography, H, W]
             panorama += self.weighted_sum(warped_images, weight_i)
@@ -242,7 +247,7 @@ class HomoDispNet(MetaStitcher):
     def flow_estimation(self, direction: int, disp: torch.Tensor, *args, **kwargs):
         flow = super().flow_estimation(*args, **kwargs)
         start, end = direction * self.homography, direction * self.homography + self.homography
-        adj = disp[..., start * 2: end * 2]
+        adj = disp[..., start * 2: end * 2] # [B, H, W, 2*homography]
 
         final_flow = flow + adj
 

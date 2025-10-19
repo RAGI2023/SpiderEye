@@ -1,4 +1,4 @@
-import os
+import os,
 import time
 import yaml
 import argparse
@@ -44,7 +44,7 @@ def parse_args():
 def get_latest_ckpt(ckpt_dir):
     ckpts = [
         f for f in glob(os.path.join(ckpt_dir, "*.pth"))
-        if not os.path.basename(f).startswith("best")
+        # if not os.path.basename(f).startswith("best")
     ]
     ckpts = sorted(ckpts, key=os.path.getmtime)
     return ckpts[-1] if ckpts else None
@@ -134,7 +134,7 @@ def main(args):
             torch.serialization.add_safe_globals([edic])
             ckpt = torch.load(latest_ckpt, map_location=map_location, weights_only=False)
             net.module.load_state_dict(ckpt['model'])
-            optimizer.load_state_dict(ckpt['optimizer'])
+            # optimizer.load_state_dict(ckpt['optimizer'])
             start_epoch = ckpt.get('epoch', 0)
             global_step = ckpt.get('global_step', 0)
             best_loss = ckpt.get('avg_loss', float('inf'))
@@ -179,12 +179,12 @@ def main(args):
             loss_l_num = l1_charbonnier_loss(outs, img_original)
             loss_ssim = ssim_loss(outs, img_original, window_size=11, is_train=True)
             loss_gradient = gradient_loss(outs, img_original)
+            loss_affine = affine_loss(net.module.theta)
+            loss = (1 - lambda1) * loss_l_num + lambda1 * loss_ssim + lambda2 * loss_affine
             if use_kl:
                 kl_loss = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
-                loss = (1 - lambda1) * loss_l_num + lambda1 * loss_ssim + lambda2 * loss_gradient + l_num * kl_loss * beta
-            else:
-                loss = (1 - lambda1) * loss_l_num + lambda1 * loss_ssim + lambda2 * loss_gradient
-
+                loss += kl_loss * beta
+            
             # ---------- Backward ----------
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
@@ -197,7 +197,7 @@ def main(args):
             if rank == 0:
                 writer.add_scalar("Loss/L_num", loss_l_num.item(), global_step)
                 writer.add_scalar("Loss/SSIM", loss_ssim.item(), global_step)
-                writer.add_scalar("Loss/Gradient", loss_gradient.item(), global_step)
+                writer.add_scalar("Loss/Affine", loss_gradient.item(), global_step)
                 if use_kl:
                     writer.add_scalar("Loss/KL", kl_loss.item(), global_step)
                 writer.add_scalar("Loss/Total", loss.item(), global_step)
@@ -233,7 +233,7 @@ def main(args):
                 ckpt = {
                     'epoch': epoch + 1,
                     'model': net.module.state_dict(),
-                    'optimizer': optimizer.state_dict(),
+                    # 'optimizer': optimizer.state_dict(),
                     'avg_loss': loss.item(),
                     'cfg': dict(g_cfg),
                     'global_step': global_step,

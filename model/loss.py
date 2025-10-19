@@ -146,3 +146,14 @@ def gradient_loss(pred, target):
     grad_loss = (diff_x + diff_y).mean()
 
     return grad_loss
+
+
+def affine_loss(theta):
+    # 仿射部分
+    I = torch.tensor([[1, 0, 0],
+                      [0, 1, 0]], dtype=torch.float32, device=theta.device)
+    I = I.view(1, 1, 2, 3).expand_as(theta)
+    loss_affine = F.mse_loss(theta, I)
+    return loss_affine
+
+
