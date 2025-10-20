@@ -15,6 +15,7 @@ from model.E2E import HomoDispNet
 from model.utils.tools import *
 from model.loss import *
 
+from model.vgg_loss import VGGPerceptualLoss
 
 with open('configs/train.yaml') as f:
     g_cfg = edic(yaml.safe_load(f))
@@ -78,6 +79,12 @@ def main(args):
             'num_workers': g_cfg.train.num_workers,
             'local_adj_limit': g_cfg.model.local_adj_limit,
             'canvas_size': str(g_cfg.data.canvas_size),
+            'lambda1': g_cfg.train.lambda1,
+            'lambda2': g_cfg.train.lambda2,
+            'lambda3': g_cfg.train.lambda3,
+            'lambda4': g_cfg.train.lambda4,
+            'l_num': g_cfg.train.l_num,
+            'beta': g_cfg.train.beta,
         }
         writer.add_hparams(hparams, {})
 
@@ -91,6 +98,7 @@ def main(args):
     net = net.to(device)
     net = nn.parallel.DistributedDataParallel(net, device_ids=[local_rank], output_device=local_rank)
     affine_loss_module = FlowIdentityLoss(reduction='mean').to(device)
+    vgg_loss_module = VGGPerceptualLoss().to(device)
     total_params = count_params(net)
 
     if rank == 0:
@@ -127,6 +135,8 @@ def main(args):
     save_interval = g_cfg.log.save_interval  # now step interval
     lambda1 = g_cfg.train.lambda1
     lambda2 = g_cfg.train.lambda2
+    lambda3 = g_cfg.train.lambda3
+    lambda4 = g_cfg.train.lambda4
     l_num = g_cfg.train.l_num
     use_kl = g_cfg.model.get('kl', False)
     beta = g_cfg.train.beta
@@ -159,7 +169,8 @@ def main(args):
             loss_ssim = ssim_loss(outs, img_original, window_size=11, is_train=True)
             loss_gradient = gradient_loss(outs, img_original)
             loss_affine = affine_loss(net.module.theta)
-            loss = (1 - lambda1) * loss_l_num + lambda1 * loss_ssim + lambda2 * loss_affine
+            loss_vgg = vgg_loss_module(outs, img_original)
+            loss = lambda1 * loss_l_num + lambda2 * loss_ssim + lambda3 * loss_affine + lambda4 * loss_vgg
             if use_kl:
                 kl_loss = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
                 loss += kl_loss * beta
@@ -177,6 +188,7 @@ def main(args):
                 writer.add_scalar("Loss/L_num", loss_l_num.item(), global_step)
                 writer.add_scalar("Loss/SSIM", loss_ssim.item(), global_step)
                 writer.add_scalar("Loss/Affine", loss_gradient.item(), global_step)
+                writer.add_scalar("Loss/VGG", loss_vgg.item(), global_step)
                 if use_kl:
                     writer.add_scalar("Loss/KL", kl_loss.item(), global_step)
                 writer.add_scalar("Loss/Total", loss.item(), global_step)

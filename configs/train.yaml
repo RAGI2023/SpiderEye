@@ -1,5 +1,5 @@
 experiment:
-  name: "stitch_ssim_kl_l2_affine"
+  name: "stitch_ssim_l2_affine_vgg"
   seed: 1
 
 data:
@@ -25,9 +25,11 @@ train:
   num_workers: 10
   grad_clip: 3
   weight_decay: 1e-4
-  lambda1: 0.2
-  lambda2: 0.1
-  l_num: 2
+  lambda1: 0.8
+  lambda2: 0.2
+  lambda3: 0.4
+  lambda4: 0.1
+  l_num: 1
   beta: 1e-3 # KL loss weight
 log:
   save_interval: 3000
@@ -40,4 +42,4 @@ model:
   local_adj_limit: 0.1
   record_weights: true
   record_warped: true
-  kl: true
+  kl: false
