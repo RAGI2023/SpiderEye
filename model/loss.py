@@ -1,4 +1,5 @@
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 import math
 
@@ -148,12 +149,50 @@ def gradient_loss(pred, target):
     return grad_loss
 
 
-def affine_loss(theta):
-    # 仿射部分
-    I = torch.tensor([[1, 0, 0],
-                      [0, 1, 0]], dtype=torch.float32, device=theta.device)
-    I = I.view(1, 1, 2, 3).expand_as(theta)
-    loss_affine = F.mse_loss(theta, I)
-    return loss_affine
+# def affine_loss(theta):
+#     # 仿射部分
+#     I = torch.tensor([[1, 0, 0],
+#                       [0, 1, 0]], dtype=torch.float32, device=theta.device)
+#     I = I.view(1, 1, 2, 3).expand_as(theta)
+#     loss_affine = F.mse_loss(theta, I)
+#     return loss_affine
 
+class FlowIdentityLoss(nn.Module):
+    """
+    Loss between predicted flow_map and identity (no transformation)
+    """
+    def __init__(self, reduction='mean'):
+        super().__init__()
+        self.reduction = reduction
+        self.mse = nn.MSELoss(reduction=reduction)
 
+    def forward(self, flow_list):
+        """
+        Args:
+            flow_list: list of flow maps from model (each [B, H, W, 2*homography])
+                       e.g., model.disp
+        Returns:
+            scalar loss
+        """
+        total_loss = 0.0
+        count = 0
+        for flow in flow_list:
+            B, H, W, C = flow.shape
+            homo = C // 2
+
+            # --- 构建理想 (identity) flow ---
+            yy, xx = torch.meshgrid(
+                torch.linspace(-1, 1, H, device=flow.device),
+                torch.linspace(-1, 1, W, device=flow.device),
+                indexing='ij'
+            )
+            base_grid = torch.stack((xx, yy), dim=-1)  # [H, W, 2]
+            base_grid = base_grid.unsqueeze(0).repeat(B, 1, 1, 1)  # [B, H, W, 2]
+
+            # --- 计算每个 homography 的偏差 ---
+            for i in range(homo):
+                flow_i = flow[..., 2*i:2*i+2]
+                total_loss += self.mse(flow_i, base_grid)
+                count += 1
+
+        return total_loss / count

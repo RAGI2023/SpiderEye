@@ -200,7 +200,7 @@ class HomoDispNet(MetaStitcher):
             theta  = self.Regressor(downfeature)        # [B, homography*N, 2, 3]
         
         self.theta = theta  # for loss computation
-        self.disp = []
+        self.flow_map = []
 
         # 生成每个方向/每个单应的权重 & 位姿参数
         weight = self.weight_block(iconv_1)         # [B, homography*N, H, W]
@@ -228,7 +228,7 @@ class HomoDispNet(MetaStitcher):
                 imgsize=[H, W],
             )  # -> [B, H, W, 2*homography]
 
-            self.disp.append(flow) # for loss computation
+            self.flow_map.append(flow) # for loss computation
 
             # 对该方向的每个单应 warp（返回 [Homography, B, C, H, W]）
             warped_images = self.warp(flow, img_i)

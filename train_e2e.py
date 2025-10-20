@@ -1,8 +1,6 @@
 import os
 import time
 import yaml
-import argparse
-from glob import glob
 from easydict import EasyDict as edic
 from tqdm import tqdm
 
@@ -28,26 +26,6 @@ with open('configs/train.yaml') as f:
     g_cfg.train.beta = float(g_cfg.train.beta)
     g_cfg.model.mean = tuple(map(float, g_cfg.model.mean.split(',')))
     g_cfg.model.std = tuple(map(float, g_cfg.model.std.split(',')))
-
-def setup_ddp():
-    dist.init_process_group(backend="nccl")
-    local_rank = int(os.environ["LOCAL_RANK"])
-    torch.cuda.set_device(local_rank)
-    device = torch.device(f"cuda:{local_rank}")
-    return device, local_rank
-
-def parse_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('-c', '--continue_train', action='store_true', help="Continue training from latest checkpoint")
-    return parser.parse_args()
-
-def get_latest_ckpt(ckpt_dir):
-    ckpts = [
-        f for f in glob(os.path.join(ckpt_dir, "*.pth"))
-        # if not os.path.basename(f).startswith("best")
-    ]
-    ckpts = sorted(ckpts, key=os.path.getmtime)
-    return ckpts[-1] if ckpts else None
 
 def main(args):
     device, local_rank = setup_ddp()
@@ -112,7 +90,7 @@ def main(args):
     # net = convert_bn_to_gn(net, max_groups=32)
     net = net.to(device)
     net = nn.parallel.DistributedDataParallel(net, device_ids=[local_rank], output_device=local_rank)
-
+    affine_loss_module = FlowIdentityLoss(reduction='mean').to(device)
     total_params = count_params(net)
 
     if rank == 0:

@@ -1,5 +1,5 @@
 experiment:
-  name: "stitch_ssim_kl_l2"
+  name: "stitch_ssim_kl_l2_affine"
   seed: 1
 
 data:
@@ -28,7 +28,7 @@ train:
   lambda1: 0.2
   lambda2: 0.1
   l_num: 2
-  beta: 1e-3
+  beta: 1e-3 # KL loss weight
 log:
   save_interval: 3000
   log_interval: 10

@@ -3,6 +3,10 @@ import torch
 import os
 import datetime as dt
 import torch.nn as nn
+import torch.distributed as dist
+from glob import glob
+import argparse
+
 
 def set_seed(seed: int):
     random.seed(seed)
@@ -21,10 +25,6 @@ def format_secs(s: float) -> str:
 def save_ckpt(state: dict, path: str):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     torch.save(state, path)
-
-import torch
-
-import torch
 
 def stitch2img(img_front, img_left, learned_mask)->torch.Tensor:
     """
@@ -67,3 +67,23 @@ def convert_bn_to_gn(module, max_groups=32):
         else:
             convert_bn_to_gn(m, max_groups)
     return module
+
+def setup_ddp():
+    dist.init_process_group(backend="nccl")
+    local_rank = int(os.environ["LOCAL_RANK"])
+    torch.cuda.set_device(local_rank)
+    device = torch.device(f"cuda:{local_rank}")
+    return device, local_rank
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-c', '--continue_train', action='store_true', help="Continue training from latest checkpoint")
+    return parser.parse_args()
+
+def get_latest_ckpt(ckpt_dir):
+    ckpts = [
+        f for f in glob(os.path.join(ckpt_dir, "*.pth"))
+        # if not os.path.basename(f).startswith("best")
+    ]
+    ckpts = sorted(ckpts, key=os.path.getmtime)
+    return ckpts[-1] if ckpts else None
