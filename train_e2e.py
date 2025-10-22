@@ -28,8 +28,7 @@ with open('configs/train.yaml') as f:
     g_cfg.train.beta = float(g_cfg.train.beta)
     g_cfg.model.mean = tuple(map(float, g_cfg.model.mean.split(',')))
     g_cfg.model.std = tuple(map(float, g_cfg.model.std.split(',')))
-    for i in range(1, 6):
-        g_cfg.train.__setitem__(f'lambda{i}', float(g_cfg.train.get(f'lambda{i}')))
+
 
 def main(args):
     device, local_rank = setup_ddp()

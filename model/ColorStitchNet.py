@@ -1,12 +1,12 @@
 import torch
 import torch.nn as nn
 
-from model.StitchNet import HomoDispNet, ImageDenormalize
+from model.StitchNet import HomoDispNet
 
 class ColorStitchNet(HomoDispNet):
     """Color StitchNet"""
-    def __init__(self, opt):
-        super(ColorStitchNet, self).__init__(opt)
+    def __init__(self, opt, device):
+        super(ColorStitchNet, self).__init__(opt, device)
         self.correct_block = self.get_correct_block(in_dim=16, out_dim=3 * self.input_direction)
     
     def forward(self, images: torch.Tensor) -> torch.Tensor:
