@@ -36,7 +36,7 @@ DEFAULT_JITTER_CONFIG = {
         "contrast": 0.2,      # 对比度扰动 [-0.2, 0.2]
         "color_jitter": 0.1,   # RGB颜色扰动 [-0.1, 0.1]
     },
-    "k_jitter": [0.01, 0.01, 0.01, 0.01],
+    "k_jitter": 0.2,
 }
 
 NO_JITTER_CONFIG = {
@@ -44,7 +44,7 @@ NO_JITTER_CONFIG = {
     "rotation_jitter": {"yaw": 0.0, "pitch": 0.0, "roll": 0.0},
     "translate_range": 0.0,
     "lighting": {"brightness": 0.0, "contrast": 0.0, "color_jitter": 0.0},
-    "k_jitter": [0.0, 0.0, 0.0, 0.0],
+    "k_jitter": 0.0,
 }
 
 # ==========================================================

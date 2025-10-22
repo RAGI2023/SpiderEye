@@ -27,7 +27,7 @@ class EquiDataset(Dataset):
         self.out_h = kwargs.get("out_h", 1080)
 
         self.fisheye_params = kwargs.get("k", (0., 0., 0., 0.))
-        self.k_jitter = self.jitter_cfg.get("k_jitter", [0.0, 0.0, 0.0, 0.0]) if self.jitter_cfg else None
+        self.k_jitter = self.jitter_cfg.get("k_jitter", 0.0) if self.jitter_cfg else None
 
 
         self.VIEWS = {
@@ -51,13 +51,13 @@ class EquiDataset(Dataset):
         img_path = self.image_files[idx]
         img = cv2.imread(img_path)
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-
         if self.k_jitter is not None:
-            self.fisheye_params = tuple(
-                self.fisheye_params[i] + np.random.uniform(-self.k_jitter[i], self.k_jitter[i])
-                for i in range(len(self.fisheye_params))
-            )
-        # print('Using fisheye params:', self.fisheye_params)
+            base_k = np.array(self.fisheye_params)
+            strength = np.random.uniform(1-self.k_jitter, 1+self.k_jitter) 
+            fisheye_params = tuple(base_k * strength)
+        else:
+            fisheye_params = self.fisheye_params
+        # print('Using fisheye params:', fisheye_params)
         # imgs:(4, H, W, 3), [0,255]
         imgs = [perspective_projection_fisheye(
             img,
@@ -68,7 +68,7 @@ class EquiDataset(Dataset):
             out_w=self.out_w,
             out_h=self.out_h,
             jitter_cfg=self.jitter_cfg,
-            k=self.fisheye_params,
+            k=fisheye_params,
 
         ) for yaw, pitch, roll in self.VIEWS.values()]
         
