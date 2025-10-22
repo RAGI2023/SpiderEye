@@ -26,11 +26,11 @@ def solve_theta_limit(k, theta_max=math.pi/2):
 DEFAULT_JITTER_CONFIG = {
     "random_seed": None,      # 设置为 None 表示每次运行随机；否则固定随机性
     "rotation_jitter": {      # 旋转扰动范围（度）
-        "yaw": 5.0,
+        "yaw": 3.0,
         "pitch": 3.0,
         "roll": 3.0
     },
-    "translate_range": 20.0,  # 平移扰动范围（像素）
+    "translate_range": 3.0,  # 平移扰动范围（像素）
     "lighting": {             # 光照扰动参数
         "brightness": 0.2,    # 亮度扰动 [-0.2, 0.2]
         "contrast": 0.2,      # 对比度扰动 [-0.2, 0.2]
@@ -63,7 +63,7 @@ def apply_lighting_jitter(img, cfg):
     ], dtype=np.float32)
 
     img = img.astype(np.float32) * rgb_gain
-    img = cv.convertScaleAbs(img, alpha=alpha, beta=beta)
+    img = cv.convertScaleAbs(img, alpha=alpha, beta=beta).astype(np.float32)
     return img
 
 
@@ -99,8 +99,8 @@ def perspective_projection_fisheye(
 
     rot_jit = jitter_cfg.get("rotation_jitter", {})
     trans_range = jitter_cfg.get("translate_range", 0.0)
-    # TODO Add lighting jitter
     light_cfg = jitter_cfg.get("lighting", {})
+    
 
     # 扰动
     yaw_deg += random.uniform(-rot_jit.get("yaw", 0), rot_jit.get("yaw", 0))
@@ -172,6 +172,8 @@ def perspective_projection_fisheye(
 
     view = cv.remap(equirect, map_x.astype(np.float32), map_y.astype(np.float32),
                     interpolation, borderMode=cv.BORDER_WRAP)
+
+    view = apply_lighting_jitter(view, light_cfg)
 
     return view
 

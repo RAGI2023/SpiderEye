@@ -52,6 +52,21 @@ def main(args):
 
     set_seed(g_cfg.data.jitter.random_seed)
 
+    jitter_cfg = {
+        "random_seed": g_cfg.data.jitter.random_seed,
+        "rotation_jitter": {      # 旋转扰动范围（度）
+            "yaw": g_cfg.data.jitter.yaw,
+            "pitch": g_cfg.data.jitter.pitch,
+            "roll": g_cfg.data.jitter.roll
+        },
+        "translate_range": g_cfg.data.jitter.translate,
+        "lighting": {             # 光照扰动参数
+            "brightness": g_cfg.data.jitter.brightness,
+            "contrast": g_cfg.data.jitter.contrast,
+            "color_jitter": g_cfg.data.jitter.color_jitter
+        }
+    }
+
     # ---------------- Dataset ----------------
     dataset = EquiDataset(
         folder_path=g_cfg.data.train_dataset,
@@ -59,7 +74,7 @@ def main(args):
         canvas_size=(g_cfg.data.canvas_size[0], g_cfg.data.canvas_size[1]),
         out_w=g_cfg.data.canvas_size[1],
         out_h=g_cfg.data.canvas_size[1],
-        jitter_cfg=g_cfg.data.jitter,
+        jitter_cfg=jitter_cfg,
         k=(0.01, -0.1, 0.1, -0.0),
     )
 
