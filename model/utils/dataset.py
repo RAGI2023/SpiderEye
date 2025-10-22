@@ -26,7 +26,7 @@ class EquiDataset(Dataset):
         self.out_w = kwargs.get("out_w", 1920)
         self.out_h = kwargs.get("out_h", 1080)
 
-        self.fisheye_params = kwargs.get("k", (0.08, -0.16, 0.35, -0.26))
+        self.fisheye_params = kwargs.get("k", (0., 0., 0., 0.))
 
         self.VIEWS = {
             "front":  (  0,   0, 0),
@@ -92,7 +92,10 @@ class EquiDataset(Dataset):
 
 if __name__ == "__main__":
     from torch.utils.data import DataLoader
-    dataset = EquiDataset(folder_path="../360SP-data/panoramas", fov=180, out_w=480, out_h=480)
+    K = (0.01, -0.1, 0.1, -0.0)
+    # K = (0.0, 0.0, 0.0, 0.0)
+    dataset = EquiDataset(folder_path="../360SP-data/panoramas", 
+                        fov=254, canvas_size=(1024, 512), out_w=512, out_h=512, k=K)
     print('Dataset length:', len(dataset))
     loader = DataLoader(dataset, batch_size=1, shuffle=True, num_workers=1)
     write_img = True

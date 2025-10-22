@@ -1,10 +1,10 @@
 experiment:
-  name: "stitch_ssim_l2_affine_vgg"
+  name: "stitch_ssim_l2_affine_vgg_254"
   seed: 1
 
 data:
   train_dataset: "/home/mg515/ragi/360SP-data/panoramas"
-  fov: 180
+  fov: 254
   canvas_size: [1024, 512]
   overlap: 0.5
   jitter:

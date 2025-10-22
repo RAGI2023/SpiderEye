@@ -56,7 +56,8 @@ def main(args):
         canvas_size=(g_cfg.data.canvas_size[0], g_cfg.data.canvas_size[1]),
         out_w=g_cfg.data.canvas_size[1],
         out_h=g_cfg.data.canvas_size[1],
-        jitter_cfg=g_cfg.data.jitter
+        jitter_cfg=g_cfg.data.jitter,
+        k=(0.01, -0.1, 0.1, -0.0),
     )
 
     sampler = DistributedSampler(dataset, shuffle=True)
