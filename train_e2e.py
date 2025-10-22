@@ -63,7 +63,8 @@ def main(args):
             "brightness": g_cfg.data.jitter.brightness,
             "contrast": g_cfg.data.jitter.contrast,
             "color_jitter": g_cfg.data.jitter.color_jitter
-        }
+        },
+        "k_jitter": g_cfg.data.jitter.k_jitter,
     }
 
     # ---------------- Dataset ----------------

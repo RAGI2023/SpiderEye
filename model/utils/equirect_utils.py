@@ -34,15 +34,17 @@ DEFAULT_JITTER_CONFIG = {
     "lighting": {             # 光照扰动参数
         "brightness": 0.2,    # 亮度扰动 [-0.2, 0.2]
         "contrast": 0.2,      # 对比度扰动 [-0.2, 0.2]
-        "color_jitter": 0.1   # RGB颜色扰动 [-0.1, 0.1]
-    }
+        "color_jitter": 0.1,   # RGB颜色扰动 [-0.1, 0.1]
+    },
+    "k_jitter": [0.01, 0.01, 0.01, 0.01],
 }
 
 NO_JITTER_CONFIG = {
     "random_seed": None,
     "rotation_jitter": {"yaw": 0.0, "pitch": 0.0, "roll": 0.0},
     "translate_range": 0.0,
-    "lighting": {"brightness": 0.0, "contrast": 0.0, "color_jitter": 0.0}
+    "lighting": {"brightness": 0.0, "contrast": 0.0, "color_jitter": 0.0},
+    "k_jitter": [0.0, 0.0, 0.0, 0.0],
 }
 
 # ==========================================================
@@ -201,12 +203,16 @@ def main_test_views():
         "random_seed": 42,
         "rotation_jitter": {"yaw": 0, "pitch": 0, "roll": 0},
         "translate_range": 0,
-        "lighting": {"brightness": 0.3, "contrast": 0.25, "color_jitter": 0.2}
+        "lighting": {"brightness": 0.3, "contrast": 0.25, "color_jitter": 0.2},
+        "k": [0.05, 0.05, 0.05, 0.05],
     }
 
     os.makedirs("runs/fisheye_realistic", exist_ok=True)
     fisheye_params = (0.08, -0.16, 0.35, -0.26)
-    # fisheye_params = (0.0, 0.0, 0.0, 0.0)  # 无畸变
+    fisheye_params = tuple(
+        fisheye_params[i] + random.uniform(-cfg["k"][i], cfg["k"][i])
+        for i in range(len(fisheye_params))
+    )
 
     for name, (yaw, pitch, roll) in views.items():
         start_time = time.time()
