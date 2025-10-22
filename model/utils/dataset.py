@@ -57,7 +57,7 @@ class EquiDataset(Dataset):
                 self.fisheye_params[i] + np.random.uniform(-self.k_jitter[i], self.k_jitter[i])
                 for i in range(len(self.fisheye_params))
             )
-        print('Using fisheye params:', self.fisheye_params)
+        # print('Using fisheye params:', self.fisheye_params)
         # imgs:(4, H, W, 3), [0,255]
         imgs = [perspective_projection_fisheye(
             img,
