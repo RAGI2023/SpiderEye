@@ -12,9 +12,9 @@ data:
     roll: 3.0
     pitch: 3.0
     yaw: 3.0
-    translate: 2.0
+    translate: 0.0
     brightness: 0.2
-    contrast: 0.2
+    contrast: 0.1
     color_jitter: 0.1
 
 train:
@@ -27,7 +27,7 @@ train:
   weight_decay: 1e-4
   lambda1: 0.8
   lambda2: 0.2
-  lambda3: 0.4
+  lambda3: 0.0
   lambda4: 0.1
   l_num: 1
   beta: 1e-3 # KL loss weight
