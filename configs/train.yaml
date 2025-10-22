@@ -42,4 +42,5 @@ model:
   local_adj_limit: 0.1
   record_weights: true
   record_warped: true
+  color_correction: true
   kl: false

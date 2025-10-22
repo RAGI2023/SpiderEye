@@ -28,7 +28,6 @@ class MetaStitcher(nn.Module):
         self.UNet = UNet()
         self.Regressor = Regressor(opt)
         self.weight_block = self.get_weight_block(16)
-        self.normalizer = ImageNormalize(opt.mean, opt.std)
 
         # --- Initialize weights if specified ---
         if hasattr(opt, "init_model"):
@@ -131,31 +130,10 @@ class MetaStitcher(nn.Module):
     def correct(self, img, color_map):
         """Color correction"""
         img = img + color_map * img * (1 - img)
-        img = self.normalizer(img)
+        # normalize 
+        img = torch.clamp(img, 0.0, 1.0)
         return img
 
-
-# ==========================================================
-# Helper normalization modules
-# ==========================================================
-class ImageNormalize(nn.Module):
-    def __init__(self, mean, std):
-        super().__init__()
-        self.function = transforms.Normalize(mean=mean, std=std, inplace=False)
-
-    def forward(self, x):
-        return self.function(x)
-
-
-class ImageDenormalize(nn.Module):
-    def __init__(self, mean, std):
-        super().__init__()
-        mean = [-m / s for m, s in zip(mean, std)]
-        std = [1 / s for s in std]
-        self.function = transforms.Normalize(mean=mean, std=std, inplace=False)
-
-    def forward(self, x):
-        return self.function(x)
 
 class HomoDispNet(MetaStitcher):
     def __init__(self, opt, device):

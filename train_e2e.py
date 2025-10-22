@@ -11,11 +11,12 @@ from torch.utils.data import DataLoader, DistributedSampler
 from torch.utils.tensorboard import SummaryWriter
 
 from model.utils.dataset import EquiDataset
-from model.E2E import HomoDispNet
+from model.StitchNet import HomoDispNet
 from model.utils.tools import *
-from model.loss import *
+from model.loss.common_loss import *
+from model.ColorStitchNet import ColorStitchNet
 
-from model.vgg_loss import VGGPerceptualLoss
+from model.loss.vgg_loss import VGGPerceptualLoss
 
 with open('configs/train.yaml') as f:
     g_cfg = edic(yaml.safe_load(f))
@@ -27,6 +28,8 @@ with open('configs/train.yaml') as f:
     g_cfg.train.beta = float(g_cfg.train.beta)
     g_cfg.model.mean = tuple(map(float, g_cfg.model.mean.split(',')))
     g_cfg.model.std = tuple(map(float, g_cfg.model.std.split(',')))
+    for i in range(1, 6):
+        g_cfg.train.__setitem__(f'lambda{i}', float(g_cfg.train.get(f'lambda{i}')))
 
 def main(args):
     device, local_rank = setup_ddp()
@@ -93,7 +96,10 @@ def main(args):
         print(f"Dataset size: {len(dataset)} | Batch size: {g_cfg.train.batch_size}")
 
     # ---------------- Model ----------------
-    net = HomoDispNet(opt=g_cfg.model, device=device)
+    if g_cfg.model.color_correction:
+        net = ColorStitchNet(opt=g_cfg.model, device=device)
+    else:
+        net = HomoDispNet(opt=g_cfg.model, device=device)
     net = torch.nn.SyncBatchNorm.convert_sync_batchnorm(net)  
     # net = convert_bn_to_gn(net, max_groups=32)
     net = net.to(device)
