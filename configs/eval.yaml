@@ -1,5 +1,5 @@
 experiment:
-  name: "stitch_jitter_all"
+  load_name: "stitch_jitter_all"
   seed: 1
 
 data:
