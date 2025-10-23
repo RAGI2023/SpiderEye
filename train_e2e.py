@@ -10,7 +10,7 @@ import torch.distributed as dist
 from torch.utils.data import DataLoader, DistributedSampler
 from torch.utils.tensorboard import SummaryWriter
 
-from model.utils.dataset import EquiDataset
+from model.utils.EquiDataset import EquiDataset
 from model.StitchNet import HomoDispNet
 from model.utils.tools import *
 from model.loss.common_loss import *
