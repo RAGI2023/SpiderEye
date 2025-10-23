@@ -1,0 +1,49 @@
+experiment:
+  name: "fine_tune_test"
+  seed: 1
+  load_name: "stitch_jitter_all"
+
+data:
+  train_dataset: "/home/mg515/ragi/360SP-data/panoramas"
+  dataset_type: "panorama" # "fisheye" or "panorama"
+  fov: 254
+  canvas_size: [1024, 512]
+  overlap: 0.5
+  jitter:
+    random_seed: 1
+    roll: 3.0
+    pitch: 3.0
+    yaw: 3.0
+    translate: 0.0
+    brightness: 0.2
+    contrast: 0.1
+    color_jitter: 0.1
+    k_jitter: 0.1
+
+train:
+  epochs: 5
+  optimizer: "adam"
+  batch_size: 2
+  lr: 1e-4
+  num_workers: 10
+  grad_clip: 3
+  weight_decay: 1e-4
+  lambda1: 0.8
+  lambda2: 0.2
+  lambda3: 0.0
+  lambda4: 0.1
+  l_num: 1
+  beta: 1e-3 # KL loss weight
+log:
+  save_interval: 80
+  log_interval: 10
+
+model:
+  homography: 1
+  mean: 0.5, 0.5, 0.5
+  std: 0.5, 0.5, 0.5
+  local_adj_limit: 0.1
+  record_weights: true
+  record_warped: true
+  color_correction: true
+  kl: false

@@ -11,6 +11,7 @@ from torch.utils.data import DataLoader, DistributedSampler
 from torch.utils.tensorboard import SummaryWriter
 
 from model.utils.EquiDataset import EquiDataset
+from model.utils.FishEyeDataset import FishEyeDataset
 from model.StitchNet import HomoDispNet
 from model.utils.tools import *
 from model.loss.common_loss import *
@@ -18,7 +19,7 @@ from model.ColorStitchNet import ColorStitchNet
 
 from model.loss.vgg_loss import VGGPerceptualLoss
 
-with open('configs/train.yaml') as f:
+with open('configs/tuning_fisheye.yaml') as f:
     g_cfg = edic(yaml.safe_load(f))
     g_cfg.train.lr = float(g_cfg.train.lr)
     g_cfg.train.batch_size = int(g_cfg.train.batch_size)
@@ -41,7 +42,7 @@ def main(args):
     # 目录
     run_root = os.path.join('runs', g_cfg.experiment.name)
     log_dir  = os.path.join(run_root, 'tb')
-    ckpt_dir = os.path.join(run_root, 'ckpts')
+    ckpt_dir = os.path.join('runs', g_cfg.experiment.get('load_name', g_cfg.experiment.name), 'ckpts') # priority to load_name
     if rank == 0:
         os.makedirs(log_dir, exist_ok=True)
         os.makedirs(ckpt_dir, exist_ok=True)
@@ -68,15 +69,23 @@ def main(args):
     }
 
     # ---------------- Dataset ----------------
-    dataset = EquiDataset(
-        folder_path=g_cfg.data.train_dataset,
-        fov=g_cfg.data.fov,
-        canvas_size=(g_cfg.data.canvas_size[0], g_cfg.data.canvas_size[1]),
-        out_w=g_cfg.data.canvas_size[1],
-        out_h=g_cfg.data.canvas_size[1],
-        jitter_cfg=jitter_cfg,
-        k=(0.01, -0.1, 0.1, -0.0),
-    )
+    dataset_type = g_cfg.data.get('dataset_type', 'panorama')
+    if dataset_type == 'fisheye':
+        dataset = FishEyeDataset(
+            folder_path=g_cfg.data.train_dataset,
+            canvas_size=(g_cfg.data.canvas_size[0], g_cfg.data.canvas_size[1]),
+            gt_type=g_cfg.data.get('gt_type', 'Samsung')
+        )
+    else:
+        dataset = EquiDataset(
+            folder_path=g_cfg.data.train_dataset,
+            fov=g_cfg.data.fov,
+            canvas_size=(g_cfg.data.canvas_size[0], g_cfg.data.canvas_size[1]),
+            out_w=g_cfg.data.canvas_size[1],
+            out_h=g_cfg.data.canvas_size[1],
+            jitter_cfg=jitter_cfg,
+            k=(0.01, -0.1, 0.1, -0.0),
+        )
 
     sampler = DistributedSampler(dataset, shuffle=True)
     loader = DataLoader(
@@ -168,7 +177,7 @@ def main(args):
     if rank == 0:
         print("################## Start Training (FP32) #######################")
 
-    for epoch in range(start_epoch, num_epochs):
+    for epoch in range(0, num_epochs):
         sampler.set_epoch(epoch)
         epoch_start = time.perf_counter()
         running_loss = 0.0
