@@ -46,7 +46,8 @@ class FishEyeDataset(Dataset):
                 img2 = cv2.imread(image_files[1])
                 if img1 is None or img2 is None:
                     raise ValueError(f"Image read failed in {dir_path}")
-
+                # print(f"Loading images from: {image_files[0]}, {image_files[1]}")
+                # print(f"img files", image_files)
                 img1 = cv2.cvtColor(img1, cv2.COLOR_BGR2RGB)
                 img2 = cv2.cvtColor(img2, cv2.COLOR_BGR2RGB)
 
@@ -54,7 +55,7 @@ class FishEyeDataset(Dataset):
                 front = img1[:, :img1.shape[1] // 2, :]
                 back  = img1[:, img1.shape[1] // 2:, :]
                 right = img2[:, :img2.shape[1] // 2, :]
-                left  = img2[:, img2.shape[1] // 2:, :]
+                left  = img2[:, img2.shape[1] // 2:, :] # right half of img2
 
                 view_size = self.canvas_size[1]
                 img_front = cv2.resize(front, (view_size, view_size))
@@ -75,17 +76,28 @@ class FishEyeDataset(Dataset):
                 imgs = torch.from_numpy(outs).float() / 255.0
 
                 # === 读取 ground truth ===
-                base_name = os.path.basename(image_files[0])
-                num_part = re.findall(r'\d+', base_name)
-                if not num_part:
-                    raise ValueError(f"Cannot extract number from {base_name}")
+                subfolders = [
+                    os.path.join(dir_path, d)
+                    for d in os.listdir(dir_path)
+                    if os.path.isdir(os.path.join(dir_path, d))
+                ]
 
-                gt_folder = num_part[-1]
-                gt_dir = os.path.join(dir_path, gt_folder)
-                gt_path = os.path.join(gt_dir, f"{self.gt_type}.jpg")
+                if len(subfolders) != 1:
+                    raise ValueError(f"Expected exactly one subfolder for GT in {dir_path}, found {len(subfolders)}")
 
-                if not os.path.exists(gt_path):
-                    raise FileNotFoundError(f"GT file not found: {gt_path}")
+                gt_dir = subfolders[0]
+
+                # 支持多种后缀
+                possible_exts = [".jpg", ".JPG", ".jpeg", ".JPEG", ".png", ".PNG"]
+                gt_path = None
+                for ext in possible_exts:
+                    candidate = os.path.join(gt_dir, f"{self.gt_type}{ext}")
+                    if os.path.exists(candidate):
+                        gt_path = candidate
+                        break
+
+                if gt_path is None:
+                    raise FileNotFoundError(f"GT file not found for {self.gt_type} in {gt_dir}")
 
                 gt_img = cv2.imread(gt_path)
                 if gt_img is None:
@@ -110,10 +122,10 @@ if __name__ == "__main__":
     dataset = FishEyeDataset(folder_path="../dataset_fisheye", canvas_size=(1024, 512))
     print("Dataset size:", len(dataset))
 
-    loader = torch.utils.data.DataLoader(dataset, batch_size=2, shuffle=True)
+    loader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=True)
     write_dir = "runs/test_fisheye_dataset"
     for imgs, gt in loader:
-        print("Imgs shape:", imgs.shape, "GT shape:", gt.shape)
+        # print("Imgs shape:", imgs.shape, "GT shape:", gt.shape)
         if write_dir is not None:
             os.makedirs(write_dir, exist_ok=True)
             for i in range(imgs.shape[0]):

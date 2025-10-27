@@ -156,6 +156,7 @@ def main(args):
             global_step = ckpt.get('global_step', 0)
             best_loss = ckpt.get('avg_loss', float('inf'))
             if rank == 0:
+                print(f"✅ Reload from {latest_ckpt}")
                 print(f"✅ Resumed from epoch {start_epoch}, step {global_step}")
 
     # ---------------- Train Loop ----------------

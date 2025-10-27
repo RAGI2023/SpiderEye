@@ -21,7 +21,7 @@ data:
     k_jitter: 0.1
 
 train:
-  epochs: 5
+  epochs: 15
   optimizer: "adam"
   batch_size: 2
   lr: 1e-4
@@ -30,7 +30,7 @@ train:
   weight_decay: 1e-4
   lambda1: 0.8
   lambda2: 0.2
-  lambda3: 0.0
+  lambda3: 0.2
   lambda4: 0.1
   l_num: 1
   beta: 1e-3 # KL loss weight
