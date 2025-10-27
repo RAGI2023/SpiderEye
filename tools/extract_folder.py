@@ -1,3 +1,4 @@
+# extract folders from Beihang V2 dataset
 import os
 import shutil
 import re
