@@ -21,7 +21,7 @@ class ColorStitchNet(HomoDispNet):
         # 将 input_direction 与实际 N 对齐
         self.input_direction = N
         
-        iconv_1, downfeature = self.UNet(images)    # iconv_1: [B, 16, H, W]
+        iconv_1, downfeature = self.backbone(images)    # iconv_1: [B, 16, H, W]
 
         if self.use_kl:
             # KL latent sampling

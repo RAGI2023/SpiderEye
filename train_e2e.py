@@ -19,7 +19,7 @@ from model.ColorStitchNet import ColorStitchNet
 
 from model.loss.vgg_loss import VGGPerceptualLoss
 
-with open('configs/tuning_fisheye.yaml') as f:
+with open('configs/train.yaml') as f:
     g_cfg = edic(yaml.safe_load(f))
     g_cfg.train.lr = float(g_cfg.train.lr)
     g_cfg.train.batch_size = int(g_cfg.train.batch_size)
@@ -29,6 +29,7 @@ with open('configs/tuning_fisheye.yaml') as f:
     g_cfg.train.beta = float(g_cfg.train.beta)
     g_cfg.model.mean = tuple(map(float, g_cfg.model.mean.split(',')))
     g_cfg.model.std = tuple(map(float, g_cfg.model.std.split(',')))
+    g_cfg.model.type = g_cfg.model.get('type', 'UNet')
 
 
 def main(args):
@@ -113,6 +114,7 @@ def main(args):
             'lambda4': g_cfg.train.lambda4,
             'l_num': g_cfg.train.l_num,
             'beta': g_cfg.train.beta,
+            'type': g_cfg.model.get('type', 'UNet')
         }
         writer.add_hparams(hparams, {})
 
@@ -134,6 +136,7 @@ def main(args):
 
     if rank == 0:
         print(f"Model params: {total_params/1e6:.2f}M")
+        print(f'Backbone Type: {g_cfg.model.type}')
 
     optimizer = torch.optim.Adam(net.parameters(), lr=g_cfg.train.lr, weight_decay=g_cfg.train.weight_decay)
 

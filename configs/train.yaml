@@ -45,3 +45,4 @@ model:
   record_warped: true
   color_correction: true
   kl: false
+  type: LinkNet

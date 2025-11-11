@@ -5,11 +5,9 @@ from torchvision import transforms
 import math
 
 from model.Unet.Unet import UNet
+from model.LinkNet.LinkNet import LinkNet
 from model.Regnet.Regnet import Regressor
 
-# ==========================================================
-# E2E (includes BaseNet logic)
-# ==========================================================
 class MetaStitcher(nn.Module):
     """
     Base Stitcher Network
@@ -25,7 +23,13 @@ class MetaStitcher(nn.Module):
         self.homography = opt.homography
 
         # --- Submodules ---
-        self.UNet = UNet()
+        backbone_type = opt.type
+        if backbone_type == 'UNet':
+            self.backbone = UNet()
+        elif backbone_type == 'LinkNet':
+            self.backbone = LinkNet()
+        else:
+            raise ValueError(f"Not supported type: {backbone_type}")
         self.Regressor = Regressor(opt)
         self.weight_block = self.get_weight_block(16)
 
@@ -164,7 +168,7 @@ class HomoDispNet(MetaStitcher):
         self.input_direction = N
         
         # UNet 已改为支持 [B, N, 3, H, W]
-        iconv_1, downfeature = self.UNet(images)    # iconv_1: [B, 16, H, W]
+        iconv_1, downfeature = self.backbone(images)    # iconv_1: [B, 16, H, W]
 
         if self.use_kl:
             # KL latent sampling
@@ -226,7 +230,6 @@ class HomoDispNet(MetaStitcher):
         flow = super().flow_estimation(*args, **kwargs)
         start, end = direction * self.homography, direction * self.homography + self.homography
         adj = disp[..., start * 2: end * 2] # [B, H, W, 2*homography]
-
         final_flow = flow + adj
 
         return final_flow
