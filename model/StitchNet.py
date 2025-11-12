@@ -148,12 +148,7 @@ class HomoDispNet(MetaStitcher):
         self.record_warped = opt.get('record_warped', False)
         self.warped = None
         self.weights = None
-        if opt.get('kl', False):
-            self.use_kl = True
-            self.mu_head = nn.Conv2d(2048, 2048, 1)
-            self.logvar_head = nn.Conv2d(2048, 2048, 1)
-        else:
-            self.use_kl = False
+
         
     def forward(self, images: torch.Tensor) -> torch.Tensor:
         """
@@ -170,16 +165,7 @@ class HomoDispNet(MetaStitcher):
         # UNet 已改为支持 [B, N, 3, H, W]
         iconv_1, downfeature = self.backbone(images)    # iconv_1: [B, 16, H, W]
 
-        if self.use_kl:
-            # KL latent sampling
-            mu = self.mu_head(downfeature)
-            logvar = self.logvar_head(downfeature)
-            std = torch.exp(0.5 * logvar)
-            eps = torch.randn_like(std)
-            z = mu + eps * std
-            theta  = self.Regressor(z)        # [B, homography*N, 2, 3]
-        else:
-            theta  = self.Regressor(downfeature)        # [B, homography*N, 2, 3]
+        theta  = self.Regressor(downfeature)        # [B, homography*N, 2, 3]
         
         self.theta = theta  # for loss computation
         self.flow_map = []
@@ -220,10 +206,7 @@ class HomoDispNet(MetaStitcher):
             weight_i = weight[:, start:end, ...]     # [B, homography, H, W]
             panorama += self.weighted_sum(warped_images, weight_i)
 
-        if self.use_kl:
-            return panorama, mu, logvar
-        else:
-            return panorama, None, None
+        return panorama, None, None
 
 
     def flow_estimation(self, direction: int, disp: torch.Tensor, *args, **kwargs):

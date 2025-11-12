@@ -26,10 +26,10 @@ with open('configs/train.yaml') as f:
     g_cfg.train.epochs = int(g_cfg.train.epochs)
     g_cfg.train.num_workers = int(g_cfg.train.num_workers)
     g_cfg.train.weight_decay = float(g_cfg.train.weight_decay)
-    g_cfg.train.beta = float(g_cfg.train.beta)
     g_cfg.model.mean = tuple(map(float, g_cfg.model.mean.split(',')))
     g_cfg.model.std = tuple(map(float, g_cfg.model.std.split(',')))
     g_cfg.model.type = g_cfg.model.get('type', 'UNet')
+    g_cfg.train.eval = True
 
 
 def main(args):
@@ -52,16 +52,17 @@ def main(args):
     writer = SummaryWriter(log_dir=log_dir) if rank == 0 else None
 
     set_seed(g_cfg.data.jitter.random_seed)
+    torch.backends.cudnn.benchmark = True  # 固定输入尺寸时可加速
 
     jitter_cfg = {
         "random_seed": g_cfg.data.jitter.random_seed,
-        "rotation_jitter": {      # 旋转扰动范围（度）
+        "rotation_jitter": {
             "yaw": g_cfg.data.jitter.yaw,
             "pitch": g_cfg.data.jitter.pitch,
             "roll": g_cfg.data.jitter.roll
         },
         "translate_range": g_cfg.data.jitter.translate,
-        "lighting": {             # 光照扰动参数
+        "lighting": {
             "brightness": g_cfg.data.jitter.brightness,
             "contrast": g_cfg.data.jitter.contrast,
             "color_jitter": g_cfg.data.jitter.color_jitter
@@ -77,6 +78,11 @@ def main(args):
             canvas_size=(g_cfg.data.canvas_size[0], g_cfg.data.canvas_size[1]),
             gt_type=g_cfg.data.get('gt_type', 'Samsung')
         )
+        eval_dataset = FishEyeDataset(
+            g_cfg.data.eval_dataset,
+            canvas_size=(g_cfg.data.canvas_size[0], g_cfg.data.canvas_size[1]),
+            gt_type=g_cfg.data.get('gt_type', 'Samsung')
+        )
     else:
         dataset = EquiDataset(
             folder_path=g_cfg.data.train_dataset,
@@ -87,15 +93,37 @@ def main(args):
             jitter_cfg=jitter_cfg,
             k=(0.01, -0.1, 0.1, -0.0),
         )
+        eval_dataset = EquiDataset(
+            folder_path=g_cfg.data.eval_dataset,
+            fov=g_cfg.data.fov,
+            canvas_size=(g_cfg.data.canvas_size[0], g_cfg.data.canvas_size[1]),
+            out_w=g_cfg.data.canvas_size[1],
+            out_h=g_cfg.data.canvas_size[1],
+            jitter_cfg=jitter_cfg,
+            k=(0.01, -0.1, 0.1, -0.0),
+        )
 
-    sampler = DistributedSampler(dataset, shuffle=True)
+    # 训练 & 评估的分布式采样器（评估不 shuffle）
+    train_sampler = DistributedSampler(dataset, shuffle=True)
+    eval_sampler  = DistributedSampler(eval_dataset, shuffle=False)
+
     loader = DataLoader(
         dataset,
         batch_size=g_cfg.train.batch_size,
-        sampler=sampler,
+        sampler=train_sampler,
         num_workers=g_cfg.train.num_workers,
         pin_memory=True,
         persistent_workers=(g_cfg.train.num_workers > 0),
+        drop_last=False
+    )
+
+    eval_loader = DataLoader(
+        eval_dataset,
+        batch_size=g_cfg.train.batch_size,
+        sampler=eval_sampler,
+        num_workers=max(1, g_cfg.train.num_workers // 2),
+        pin_memory=True,
+        persistent_workers=False,
         drop_last=False
     )
 
@@ -113,7 +141,6 @@ def main(args):
             'lambda3': g_cfg.train.lambda3,
             'lambda4': g_cfg.train.lambda4,
             'l_num': g_cfg.train.l_num,
-            'beta': g_cfg.train.beta,
             'type': g_cfg.model.get('type', 'UNet')
         }
         writer.add_hparams(hparams, {})
@@ -126,11 +153,13 @@ def main(args):
         net = ColorStitchNet(opt=g_cfg.model, device=device)
     else:
         net = HomoDispNet(opt=g_cfg.model, device=device)
-    net = torch.nn.SyncBatchNorm.convert_sync_batchnorm(net)  
-    # net = convert_bn_to_gn(net, max_groups=32)
+
+    net = torch.nn.SyncBatchNorm.convert_sync_batchnorm(net)
     net = net.to(device)
     net = nn.parallel.DistributedDataParallel(net, device_ids=[local_rank], output_device=local_rank)
-    affine_loss_module = FlowIdentityLoss(reduction='mean').to(device)
+
+    # loss 模块（保持你的原有用法）
+    affine_loss_module = FlowIdentityLoss(reduction='mean').to(device)  # 仅保留，若不用可删除
     vgg_loss_module = VGGPerceptualLoss().to(device)
     total_params = count_params(net)
 
@@ -167,22 +196,25 @@ def main(args):
     total_elapsed = 0.0
 
     log_interval = g_cfg.log.log_interval
-    save_interval = g_cfg.log.save_interval  # now step interval
+    save_interval = g_cfg.log.save_interval
+    eval_interval = g_cfg.log.eval_interval
+
     lambda1 = g_cfg.train.lambda1
     lambda2 = g_cfg.train.lambda2
     lambda3 = g_cfg.train.lambda3
     lambda4 = g_cfg.train.lambda4
     l_num = g_cfg.train.l_num
-    use_kl = g_cfg.model.get('kl', False)
-    beta = g_cfg.train.beta
 
     l1_charbonnier_loss = L1_Charbonnier_loss(eps=1e-6)
 
     if rank == 0:
         print("################## Start Training (FP32) #######################")
 
-    for epoch in range(0, num_epochs):
-        sampler.set_epoch(epoch)
+    for epoch in range(start_epoch, num_epochs):
+        # 分别对 train/eval sampler 设 epoch
+        train_sampler.set_epoch(epoch)
+        eval_sampler.set_epoch(epoch)
+
         epoch_start = time.perf_counter()
         running_loss = 0.0
 
@@ -203,12 +235,9 @@ def main(args):
             loss_l_num = l_num_loss(outs, img_original, num=l_num)
             loss_ssim = ssim_loss(outs, img_original, window_size=11, is_train=True)
             loss_gradient = gradient_loss(outs, img_original)
-            loss_affine = affine_loss(net.module.theta)
+            loss_affine = affine_loss(net.module.theta)  # 按你原始写法保留
             loss_vgg = vgg_loss_module(outs, img_original)
             loss = lambda1 * loss_l_num + lambda2 * loss_ssim + lambda3 * loss_affine + lambda4 * loss_vgg
-            if use_kl:
-                kl_loss = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
-                loss += kl_loss * beta
             
             # ---------- Backward ----------
             optimizer.zero_grad(set_to_none=True)
@@ -222,13 +251,12 @@ def main(args):
             if rank == 0:
                 writer.add_scalar("Loss/L_num", loss_l_num.item(), global_step)
                 writer.add_scalar("Loss/SSIM", loss_ssim.item(), global_step)
-                writer.add_scalar("Loss/Affine", loss_gradient.item(), global_step)
+                writer.add_scalar("Loss/Gradient", loss_gradient.item(), global_step)  # 修正命名
+                writer.add_scalar("Loss/Affine", loss_affine.item(), global_step)      # 新增对齐
                 writer.add_scalar("Loss/VGG", loss_vgg.item(), global_step)
-                if use_kl:
-                    writer.add_scalar("Loss/KL", kl_loss.item(), global_step)
                 writer.add_scalar("Loss/Total", loss.item(), global_step)
 
-                if global_step % log_interval == 0:
+                if (global_step % log_interval == 0) and (global_step > 0):
                     vis_front = imgs[0,0].detach().cpu()
                     vis_right = imgs[0,1].detach().cpu()
                     vis_back  = imgs[0,2].detach().cpu()
@@ -244,18 +272,16 @@ def main(args):
                     # weights
                     if net.module.weights is not None:
                         weight_vis = net.module.weights[0]  # [homography*N, H, W]
-                        # homography=1
                         for idx in range(weight_vis.shape[0]):
                             writer.add_image(f"Weights/Direction_{idx}", weight_vis[idx].unsqueeze(0), global_step)
                         
                     if net.module.record_warped and net.module.warped is not None:
-                        # net.module.warped: list of length N, each is [homography, B, C, H, W]
                         for dir_idx, warped_imgs in enumerate(net.module.warped):
                             writer.add_image(f"Warped/Direction_{dir_idx}", warped_imgs, global_step)
                         
 
             # ---------- Save ckpt per step ----------
-            if rank == 0 and global_step % save_interval == 0 and global_step > 0:
+            if rank == 0 and (global_step % save_interval == 0) and (global_step > 0):
                 ckpt = {
                     'epoch': epoch + 1,
                     'model': net.module.state_dict(),
@@ -266,8 +292,53 @@ def main(args):
                 }
                 save_ckpt(ckpt, os.path.join(ckpt_dir, f'step_{global_step}.pth'))
 
-            global_step += 1
+            # ---------- Eval（分布式，跳过 step=0）----------
+            if (global_step % eval_interval == 0) and (global_step > 0):
+                net.eval()
+                local_time_sum = 0.0
+                local_sample_cnt = 0
+                logged_vis = False
 
+                with torch.no_grad():
+                    for j, (e_imgs, e_img_original) in enumerate(eval_loader):
+                        e_imgs = e_imgs.to(device, non_blocking=True)
+
+                        torch.cuda.synchronize(device)
+                        t0 = time.perf_counter()
+
+                        e_outs, _, _ = net(e_imgs)
+
+                        torch.cuda.synchronize(device)
+                        t1 = time.perf_counter()
+
+                        local_time_sum += (t1 - t0)
+                        local_sample_cnt += e_imgs.size(0)
+
+                        if (rank == 0) and (not logged_vis):
+                            vis_out = e_outs[0].detach().cpu().clamp(0, 1)
+                            writer.add_images("Eval/Output", vis_out.unsqueeze(0), global_step)
+                            writer.add_images("Eval/GroundTruth", e_img_original[0].detach().cpu().unsqueeze(0), global_step)
+                            logged_vis = True
+
+                # 汇总各 rank 的时间与样本数
+                t_tensor = torch.tensor([local_time_sum], device=device)
+                n_tensor = torch.tensor([local_sample_cnt], device=device)
+                dist.all_reduce(t_tensor, op=dist.ReduceOp.SUM)
+                dist.all_reduce(n_tensor, op=dist.ReduceOp.SUM)
+
+                total_time = t_tensor.item()
+                total_samples = int(n_tensor.item())
+                avg_ms_per_image = (total_time / max(total_samples, 1)) * 1000.0
+
+                if rank == 0:
+                    writer.add_scalar("Eval/Avg_Infer_ms_per_image", avg_ms_per_image, global_step)
+                    print(f"✅ Eval @ step {global_step} | Avg infer time: {avg_ms_per_image:.3f} ms/img "
+                          f"(samples={total_samples}, world_size={world_size})")
+
+                net.train()
+
+            # 统一在训练循环尾部自增 step & 更新进度条（避免评估里重复加）
+            global_step += 1
             if rank == 0:
                 pbar.update(1)
                 pbar.set_postfix(loss=f"{loss.item():.4f}")

@@ -23,16 +23,7 @@ class ColorStitchNet(HomoDispNet):
         
         iconv_1, downfeature = self.backbone(images)    # iconv_1: [B, 16, H, W]
 
-        if self.use_kl:
-            # KL latent sampling
-            mu = self.mu_head(downfeature)
-            logvar = self.logvar_head(downfeature)
-            std = torch.exp(0.5 * logvar)
-            eps = torch.randn_like(std)
-            z = mu + eps * std
-            theta  = self.Regressor(z)        # [B, homography*N, 2, 3]
-        else:
-            theta  = self.Regressor(downfeature)        # [B, homography*N, 2, 3]
+        theta  = self.Regressor(downfeature)        # [B, homography*N, 2, 3]
         
         self.theta = theta  # for loss computation
         self.flow_map = []
@@ -74,7 +65,4 @@ class ColorStitchNet(HomoDispNet):
             weight_i = weight[:, start:end, ...]     # [B, homography, H, W]
             panorama += self.weighted_sum(warped_images, weight_i)
 
-        if self.use_kl:
-            return panorama, mu, logvar
-        else:
-            return panorama, None, None
+        return panorama, None, None

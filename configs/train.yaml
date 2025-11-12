@@ -1,9 +1,10 @@
 experiment:
-  name: "stitch_jitter_all"
+  name: "stitch_gen"
   seed: 1
 
 data:
-  train_dataset: "/home/mg515/ragi/360SP-data/panoramas"
+  train_dataset: "/home/mg515/ragi/360SP-data/train"
+  eval_dataset: "/home/mg515/ragi/360SP-data/eval"
   fov: 254
   canvas_size: [1024, 512]
   overlap: 0.5
@@ -19,7 +20,7 @@ data:
     k_jitter: 0.1
 
 train:
-  epochs: 50
+  epochs: 5
   optimizer: "adam"
   batch_size: 2
   lr: 1e-4
@@ -31,10 +32,10 @@ train:
   lambda3: 0.0
   lambda4: 0.1
   l_num: 1
-  beta: 1e-3 # KL loss weight
 log:
   save_interval: 3000
   log_interval: 10
+  eval_interval: 60000 # set 0 to disable eval
 
 model:
   homography: 1
@@ -44,5 +45,4 @@ model:
   record_weights: true
   record_warped: true
   color_correction: true
-  kl: false
-  type: LinkNet
+  type: LinkNet # UNet LinkNet
