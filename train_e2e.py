@@ -185,11 +185,11 @@ def main(args):
             net.module.load_state_dict(ckpt['model'])
             # optimizer.load_state_dict(ckpt['optimizer'])
             start_epoch = ckpt.get('epoch', 0)
-            global_step = ckpt.get('global_step', 0)
+            last_step = ckpt.get('global_step', 0)
             best_loss = ckpt.get('avg_loss', float('inf'))
             if rank == 0:
                 print(f"✅ Reload from {latest_ckpt}")
-                print(f"✅ Resumed from epoch {start_epoch}, step {global_step}")
+                print(f"✅ Resumed from epoch {start_epoch}, step {last_step}")
 
     # ---------------- Train Loop ----------------
     num_epochs = g_cfg.train.epochs
@@ -210,7 +210,7 @@ def main(args):
     if rank == 0:
         print("################## Start Training (FP32) #######################")
 
-    for epoch in range(start_epoch, num_epochs):
+    for epoch in range(start_epoch, num_epochs+start_epoch):
         # 分别对 train/eval sampler 设 epoch
         train_sampler.set_epoch(epoch)
         eval_sampler.set_epoch(epoch)
@@ -228,7 +228,7 @@ def main(args):
             img_original = img_original.to(device, non_blocking=True)
 
             # ---------- Forward ----------
-            outs, mu, logvar = net(imgs)
+            outs = net(imgs)
 
             # ---------- Loss ----------
             # loss_l_num = l1_charbonnier_loss(outs, img_original)
@@ -303,12 +303,12 @@ def main(args):
                     for j, (e_imgs, e_img_original) in enumerate(eval_loader):
                         e_imgs = e_imgs.to(device, non_blocking=True)
 
-                        torch.cuda.synchronize(device)
+                        # torch.cuda.synchronize(device)
                         t0 = time.perf_counter()
 
                         e_outs, _, _ = net(e_imgs)
 
-                        torch.cuda.synchronize(device)
+                        # torch.cuda.synchronize(device)
                         t1 = time.perf_counter()
 
                         local_time_sum += (t1 - t0)

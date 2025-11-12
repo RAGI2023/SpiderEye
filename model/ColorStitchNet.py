@@ -65,4 +65,4 @@ class ColorStitchNet(HomoDispNet):
             weight_i = weight[:, start:end, ...]     # [B, homography, H, W]
             panorama += self.weighted_sum(warped_images, weight_i)
 
-        return panorama, None, None
+        return panorama
