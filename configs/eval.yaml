@@ -4,6 +4,7 @@ experiment:
 
 data:
   train_dataset: "/home/mg515/ragi/360SP-data/panoramas"
+  dataset_type: "panorama" # "fisheye" or "panorama"
   fov: 254
   canvas_size: [1024, 512]
   overlap: 0.5

@@ -7,6 +7,17 @@ import torch.distributed as dist
 from glob import glob
 import argparse
 
+def check_cfg_keys(g_cfg):
+    g_cfg.train.lr = float(g_cfg.train.lr)
+    g_cfg.train.batch_size = int(g_cfg.train.batch_size)
+    g_cfg.train.epochs = int(g_cfg.train.epochs)
+    g_cfg.train.num_workers = int(g_cfg.train.num_workers)
+    g_cfg.train.weight_decay = float(g_cfg.train.weight_decay)
+    g_cfg.model.mean = tuple(map(float, g_cfg.model.mean.split(',')))
+    g_cfg.model.std = tuple(map(float, g_cfg.model.std.split(',')))
+    g_cfg.model.type = g_cfg.model.get('type', 'UNet')
+    g_cfg.train.eval = True
+
 
 def set_seed(seed: int):
     random.seed(seed)

@@ -1,5 +1,5 @@
 experiment:
-  name: "stitch_gen"
+  name: "stitch_gen_UNet"
   seed: 1
 
 data:
@@ -45,4 +45,4 @@ model:
   record_weights: true
   record_warped: true
   color_correction: true
-  type: LinkNet # UNet LinkNet
+  type: UNet # UNet LinkNet

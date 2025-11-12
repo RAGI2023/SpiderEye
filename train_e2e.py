@@ -21,16 +21,7 @@ from model.loss.vgg_loss import VGGPerceptualLoss
 
 with open('configs/train.yaml') as f:
     g_cfg = edic(yaml.safe_load(f))
-    g_cfg.train.lr = float(g_cfg.train.lr)
-    g_cfg.train.batch_size = int(g_cfg.train.batch_size)
-    g_cfg.train.epochs = int(g_cfg.train.epochs)
-    g_cfg.train.num_workers = int(g_cfg.train.num_workers)
-    g_cfg.train.weight_decay = float(g_cfg.train.weight_decay)
-    g_cfg.model.mean = tuple(map(float, g_cfg.model.mean.split(',')))
-    g_cfg.model.std = tuple(map(float, g_cfg.model.std.split(',')))
-    g_cfg.model.type = g_cfg.model.get('type', 'UNet')
-    g_cfg.train.eval = True
-
+    check_cfg_keys(g_cfg)
 
 def main(args):
     device, local_rank = setup_ddp()
@@ -306,7 +297,7 @@ def main(args):
                         # torch.cuda.synchronize(device)
                         t0 = time.perf_counter()
 
-                        e_outs, _, _ = net(e_imgs)
+                        e_outs = net(e_imgs)
 
                         # torch.cuda.synchronize(device)
                         t1 = time.perf_counter()
