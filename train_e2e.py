@@ -91,7 +91,7 @@ def main(args):
             out_w=g_cfg.data.canvas_size[1],
             out_h=g_cfg.data.canvas_size[1],
             jitter_cfg=jitter_cfg,
-            k=(0.01, -0.1, 0.1, -0.0),
+            k=(0.2, -0.0015, 0.0015, -0.002),
         )
 
     # 训练 & 评估的分布式采样器（评估不 shuffle）

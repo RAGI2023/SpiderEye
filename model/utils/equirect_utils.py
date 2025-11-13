@@ -3,22 +3,32 @@ import numpy as np
 import math
 import os
 import random
+from scipy.optimize import root_scalar
 
-def solve_theta_limit(k, theta_max=math.pi/2):
-    """求解使 θ_d = π/2 的最小 θ₀"""
+def theta_d(theta, k):
     k1, k2, k3, k4 = k
+    return theta * (1 + k1*theta**2 + k2*theta**4 + 
+                           k3*theta**6 + k4*theta**8)
 
-    def theta_d(theta):
-        return theta * (1 + k1*theta**2 + k2*theta**4 + k3*theta**6 + k4*theta**8)
+def diff_theta_d(theta, k):
+    k1, k2, k3, k4 = k
+    return (1 + 3*k1*theta**2 + 5*k2*theta**4 + 
+                  7*k3*theta**6 + 9*k4*theta**8)
+def solve_theta_limit(k, theta_max=math.pi/2):
+    f = lambda t: theta_d(t, k) - theta_max
+    df = lambda t: diff_theta_d(t, k)
+    # 自动找区间：先从 0 到 π
+    left, right = 0.0, math.pi/2.0
 
-    lo, hi = 0.0, math.pi
-    for _ in range(100):
-        mid = 0.5 * (lo + hi)
-        if theta_d(mid) < theta_max:
-            lo = mid
-        else:
-            hi = mid
-    return lo
+    # 检查是否有解
+    if f(left) > 0: 
+        return left
+    if f(right) < 0:
+        return None  # 无解
+
+    sol1 = root_scalar(f, bracket=[left, right], method='brentq')
+    return sol1.root
+
 
 # ==========================================================
 # 统一的默认扰动配置
@@ -132,7 +142,12 @@ def perspective_projection_fisheye(
     # -------------------------------
     k1, k2, k3, k4 = k
     theta_d = theta * (1 + k1 * theta**2 + k2 * theta**4 + k3 * theta**6 + k4 * theta**8)
-
+    theta_limit = solve_theta_limit(k, theta_max=fov_d / 2)
+    if theta_limit is not None:
+        r_limit = (theta_limit / (fov_d / 2)) * (diag / 2)
+        mask = r <= r_limit
+    else:
+        mask = np.ones_like(r, dtype=bool)
 
     # -------------------------------
     # 构建射线 (相机坐标系下)
@@ -177,6 +192,8 @@ def perspective_projection_fisheye(
 
     view = apply_lighting_jitter(view, light_cfg)
 
+    view[~mask] = 0
+
     return view
 
 
@@ -204,11 +221,11 @@ def main_test_views():
         "rotation_jitter": {"yaw": 0, "pitch": 0, "roll": 0},
         "translate_range": 0,
         "lighting": {"brightness": 0.3, "contrast": 0.25, "color_jitter": 0.2},
-        "k": [0.05, 0.05, 0.05, 0.05],
+        "k": [0.00, 0.00, 0., 0.],
     }
 
     os.makedirs("runs/fisheye_realistic", exist_ok=True)
-    fisheye_params = (0.08, -0.16, 0.35, -0.26)
+    fisheye_params = (0.2, -0.0015, 0.0015, -0.002)
     fisheye_params = tuple(
         fisheye_params[i] + random.uniform(-cfg["k"][i], cfg["k"][i])
         for i in range(len(fisheye_params))
@@ -218,7 +235,7 @@ def main_test_views():
         start_time = time.time()
         out = perspective_projection_fisheye(
             img,
-            fov_diag_deg=190,
+            fov_diag_deg=254,
             yaw_deg=yaw,
             pitch_deg=pitch,
             roll_deg=roll,
@@ -243,7 +260,7 @@ def main_test_k():
  
     out = perspective_projection_fisheye(
         img,
-        fov_diag_deg=180,
+        fov_diag_deg=254,
         yaw_deg=0,
         pitch_deg=0,
         roll_deg=0,
