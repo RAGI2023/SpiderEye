@@ -1,10 +1,11 @@
 experiment:
-  name: "fine_tune"
+  name: "fine_tune_unet"
   seed: 1
-  load_name: "stitch_jitter_all"
+  load_name: "better_fishere_unet"
 
 data:
-  train_dataset: "/home/mg515/ragi/dataset_fisheye"
+  train_dataset: "/home/mg515/ragi/eval_and_train/train"
+  eval_dataset: "/home/mg515/ragi/eval_and_train/eval"
   dataset_type: "fisheye" # "fisheye" or "panorama"
   fov: 254
   canvas_size: [1024, 512]
@@ -18,10 +19,10 @@ data:
     brightness: 0.2
     contrast: 0.1
     color_jitter: 0.1
-    k_jitter: 0.1
+    k_jitter: 0.0
 
 train:
-  epochs: 30
+  epochs: 3
   optimizer: "adam"
   batch_size: 2
   lr: 1e-4
@@ -34,8 +35,9 @@ train:
   lambda4: 0.1
   l_num: 1
 log:
-  save_interval: 80
+  save_interval: 20
   log_interval: 10
+  eval_interval: 62
 
 model:
   homography: 1
@@ -45,3 +47,4 @@ model:
   record_weights: true
   record_warped: true
   color_correction: true
+  type: UNet # UNet LinkNet

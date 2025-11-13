@@ -19,7 +19,7 @@ from model.ColorStitchNet import ColorStitchNet
 
 from model.loss.vgg_loss import VGGPerceptualLoss
 
-with open('configs/train.yaml') as f:
+with open('configs/tuning_fisheye.yaml') as f:
     g_cfg = edic(yaml.safe_load(f))
     check_cfg_keys(g_cfg)
 
@@ -34,7 +34,8 @@ def main(args):
     # 目录
     run_root = os.path.join('runs', g_cfg.experiment.name)
     log_dir  = os.path.join(run_root, 'tb')
-    ckpt_dir = os.path.join('runs', g_cfg.experiment.get('load_name', g_cfg.experiment.name), 'ckpts') # priority to load_name
+    load_ckpt_dir = os.path.join('runs', g_cfg.experiment.get('load_name', g_cfg.experiment.name), 'ckpts') # priority to load_name
+    ckpt_dir = os.path.join('runs', g_cfg.experiment.name, 'ckpts') # priority to load_name
     if rank == 0:
         os.makedirs(log_dir, exist_ok=True)
         os.makedirs(ckpt_dir, exist_ok=True)
@@ -82,7 +83,7 @@ def main(args):
             out_w=g_cfg.data.canvas_size[1],
             out_h=g_cfg.data.canvas_size[1],
             jitter_cfg=jitter_cfg,
-            k=(0.01, -0.1, 0.1, -0.0),
+            k=(0.35, -0.0015, 0.002, -0.002),
         )
         eval_dataset = EquiDataset(
             folder_path=g_cfg.data.eval_dataset,
@@ -91,7 +92,7 @@ def main(args):
             out_w=g_cfg.data.canvas_size[1],
             out_h=g_cfg.data.canvas_size[1],
             jitter_cfg=jitter_cfg,
-            k=(0.2, -0.0015, 0.0015, -0.002),
+            k=(00.35, -0.0015, 0.002, -0.002),
         )
 
     # 训练 & 评估的分布式采样器（评估不 shuffle）
@@ -166,7 +167,7 @@ def main(args):
     best_loss = float('inf')
 
     if args.continue_train:
-        latest_ckpt = get_latest_ckpt(ckpt_dir)
+        latest_ckpt = get_latest_ckpt(load_ckpt_dir)
         if latest_ckpt:
             if rank == 0:
                 print(f"🔄 Loading latest checkpoint: {latest_ckpt}")

@@ -1,10 +1,11 @@
 experiment:
-  load_name: "stitch_gen_UNet"
+  load_name: "fine_tune_unet"
   seed: 1
 
 data:
-  train_dataset: "/home/mg515/ragi/360SP-data/eval"
-  dataset_type: "panorama" # "fisheye" or "panorama"
+  # train_dataset: "/home/mg515/ragi/360SP-data/eval"
+  train_dataset: "/home/mg515/ragi/eval_and_train/eval"
+  dataset_type: "fisheye" # "fisheye" or "panorama"
   fov: 254
   canvas_size: [1024, 512]
   overlap: 0.5

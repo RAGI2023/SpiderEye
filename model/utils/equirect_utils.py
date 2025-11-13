@@ -225,7 +225,7 @@ def main_test_views():
     }
 
     os.makedirs("runs/fisheye_realistic", exist_ok=True)
-    fisheye_params = (0.2, -0.0015, 0.0015, -0.002)
+    fisheye_params = (0.35, -0.0015, 0.002, -0.002)
     fisheye_params = tuple(
         fisheye_params[i] + random.uniform(-cfg["k"][i], cfg["k"][i])
         for i in range(len(fisheye_params))
@@ -235,7 +235,7 @@ def main_test_views():
         start_time = time.time()
         out = perspective_projection_fisheye(
             img,
-            fov_diag_deg=254,
+            fov_diag_deg=180,
             yaw_deg=yaw,
             pitch_deg=pitch,
             roll_deg=roll,

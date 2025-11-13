@@ -5,7 +5,7 @@ experiment:
 data:
   train_dataset: "/home/mg515/ragi/360SP-data/train"
   eval_dataset: "/home/mg515/ragi/360SP-data/eval"
-  fov: 254
+  fov: 180
   canvas_size: [1024, 512]
   overlap: 0.5
   jitter:
@@ -45,4 +45,4 @@ model:
   record_weights: true
   record_warped: true
   color_correction: true
-  type: LinkNet # UNet LinkNet
+  type: UNet # UNet LinkNet
