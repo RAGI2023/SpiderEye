@@ -14,7 +14,7 @@ import cv2
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--cfg', type=str, default='configs/eval.yaml', help='path to config file')
+    parser.add_argument('-c', '--cfg', type=str, default='configs/eval.yaml', help='path to config file')
     parser.add_argument('-d', '--device', type=str, default='cuda:0', help='compute device')
     parser.add_argument('-r', '--save_ratio', type=float, default=0.05, help='ratio for saving images')
     parser.add_argument('-o', '--output_dir', type=str, default='./runs/eval_outputs', help='output directory')
@@ -68,20 +68,15 @@ def main():
     )
 
     # --- Model
-    if cfg.model.type == 'LinkNet':
-        net = LinkNet(cfg.model, device=args.device)
-    elif cfg.model.type == 'UNet':
-        net = ColorStitchNet(cfg.model, device=args.device)
-    else:
-        raise ValueError(f"Unknown model type: {cfg.model.type}")
-
+    net = ColorStitchNet(opt=cfg.model, device=args.device)
+    
     net.to(args.device)
     net.eval()
 
     # --- Load checkpoint
     ckpt_dir = os.path.join('runs', cfg.experiment.load_name, 'ckpts')
     ckpt_path = (
-        os.path.join(ckpt_dir, f'ckpt_{args.load_ckpt:d}.pth')
+        os.path.join(ckpt_dir, f'step_{args.load_ckpt:d}.pth')
         if args.load_ckpt is not None
         else os.path.join(ckpt_dir, 'best.pth')
     )
@@ -95,7 +90,7 @@ def main():
     print(f"✅ Loaded from {ckpt_path} (epoch {ckpt.get('epoch', 0)}, step {ckpt.get('global_step', 0)})")
 
     # --- Inference
-    args.output_dir = os.path.join(args.output_dir, cfg.experiment.load_name)
+    args.output_dir = os.path.join(args.output_dir, cfg.experiment.load_name, f'epoch{ckpt.get("epoch", 0)}_step_{ckpt.get("global_step", 0)}')
     os.makedirs(args.output_dir, exist_ok=True)
     total_time = 0.0
     pbar = tqdm(total=len(loader), desc="Evaluating", ncols=100)

@@ -1,9 +1,9 @@
 experiment:
-  load_name: "stitch_jitter_all"
+  load_name: "stitch_gen_link"
   seed: 1
 
 data:
-  train_dataset: "/home/mg515/ragi/360SP-data/panoramas"
+  train_dataset: "/home/mg515/ragi/360SP-data/eval"
   dataset_type: "panorama" # "fisheye" or "panorama"
   fov: 254
   canvas_size: [1024, 512]
@@ -45,3 +45,4 @@ model:
   record_weights: true
   record_warped: true
   color_correction: true
+  type: LinkNet # UNet LinkNet
