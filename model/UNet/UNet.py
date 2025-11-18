@@ -66,7 +66,7 @@ class UNet(nn.Module):
         # Channel configuration (same as in the paper)
         c1, c2, c3, c4, c5, c6, c7, cf = 16, 32, 64, 128, 256, 256, 512, 32
         self.N = 4  # Number of input views
-
+        self.c7 = c7 # for GRU input dimension
         # ------- Encoder -------
         self.down1 = downconv_double(3, c1, 7)
         self.down2 = downconv_double(c1, c2, 5)

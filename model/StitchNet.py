@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from torchvision import transforms
 import math
 
-from model.Unet.Unet import UNet
+from model.UNet.UNet import UNet
 from model.LinkNet.LinkNet import LinkNet
 from model.Regnet.Regnet import Regressor
 
