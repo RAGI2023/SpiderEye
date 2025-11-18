@@ -8,7 +8,6 @@ import torch
 from model.utils.EquiDataset import EquiDataset
 from model.utils.FishEyeDataset import FishEyeDataset
 from model.ColorStitchNet import ColorStitchNet
-from model.LinkNet.LinkNet import LinkNet
 
 import cv2
 

@@ -35,7 +35,7 @@ def main(args):
     run_root = os.path.join('runs', g_cfg.experiment.name)
     log_dir  = os.path.join(run_root, 'tb')
     load_ckpt_dir = os.path.join('runs', g_cfg.experiment.get('load_name', g_cfg.experiment.name), 'ckpts') # priority to load_name
-    ckpt_dir = os.path.join('runs', g_cfg.experiment.name, 'ckpts') # priority to load_name
+    ckpt_dir = os.path.join('runs', g_cfg.experiment.name, 'ckpts') 
     if rank == 0:
         os.makedirs(log_dir, exist_ok=True)
         os.makedirs(ckpt_dir, exist_ok=True)
@@ -150,7 +150,7 @@ def main(args):
     net = net.to(device)
     net = nn.parallel.DistributedDataParallel(net, device_ids=[local_rank], output_device=local_rank)
 
-    # loss 模块（保持你的原有用法）
+    # loss 模块
     affine_loss_module = FlowIdentityLoss(reduction='mean').to(device)  # 仅保留，若不用可删除
     vgg_loss_module = VGGPerceptualLoss().to(device)
     total_params = count_params(net)
@@ -197,8 +197,6 @@ def main(args):
     lambda4 = g_cfg.train.lambda4
     l_num = g_cfg.train.l_num
 
-    l1_charbonnier_loss = L1_Charbonnier_loss(eps=1e-6)
-
     if rank == 0:
         print("################## Start Training (FP32) #######################")
 
@@ -211,7 +209,7 @@ def main(args):
         running_loss = 0.0
 
         if rank == 0:
-            pbar = tqdm(total=len(loader), desc=f"Epoch {epoch+1}/{num_epochs}", ncols=100)
+            pbar = tqdm(total=len(loader), desc=f"Epoch {epoch+1}/{num_epochs+start_epoch}", ncols=100)
 
         net.train()
 
@@ -241,10 +239,11 @@ def main(args):
 
             # ---------- TensorBoard ----------
             if rank == 0:
+                # print(f"Step {global_step} | Loss: {loss.item():.4f} | ")
                 writer.add_scalar("Loss/L_num", loss_l_num.item(), global_step)
                 writer.add_scalar("Loss/SSIM", loss_ssim.item(), global_step)
-                writer.add_scalar("Loss/Gradient", loss_gradient.item(), global_step)  # 修正命名
-                writer.add_scalar("Loss/Affine", loss_affine.item(), global_step)      # 新增对齐
+                writer.add_scalar("Loss/Gradient", loss_gradient.item(), global_step)
+                writer.add_scalar("Loss/Affine", loss_affine.item(), global_step)
                 writer.add_scalar("Loss/VGG", loss_vgg.item(), global_step)
                 writer.add_scalar("Loss/Total", loss.item(), global_step)
 
@@ -329,7 +328,6 @@ def main(args):
 
                 net.train()
 
-            # 统一在训练循环尾部自增 step & 更新进度条（避免评估里重复加）
             global_step += 1
             if rank == 0:
                 pbar.update(1)

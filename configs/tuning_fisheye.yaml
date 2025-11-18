@@ -22,7 +22,7 @@ data:
     k_jitter: 0.0
 
 train:
-  epochs: 3
+  epochs: 5
   optimizer: "adam"
   batch_size: 2
   lr: 1e-4
