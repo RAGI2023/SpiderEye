@@ -45,4 +45,4 @@ model:
   record_weights: true
   record_warped: true
   color_correction: true
-  type: UNet # UNet LinkNet UNetGRU
+  type: UNetGRU # UNet LinkNet UNetGRU

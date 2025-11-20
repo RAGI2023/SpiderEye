@@ -8,7 +8,7 @@ class Regressor(nn.Module):
         self.opt = opt
         self.homography = opt.homography
         self.input_direction = 4
-        self.first_layer = self.input_direction * 512  # 4 * 512 = 2048
+        self.first_layer = self.input_direction * opt.get('first_layer', 256)  # 4 * 256 = 1024
 
         self.conv45 = self.conv_block(self.first_layer, 512, kernel_size=3, stride=2)
         self.conv5a = self.conv_block(512, 512, kernel_size=3, stride=1)

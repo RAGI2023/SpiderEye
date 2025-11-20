@@ -15,8 +15,7 @@ from model.utils.FishEyeDataset import FishEyeDataset
 from model.utils.EquiVideoDataset import EquiVideoDataset
 from model.StitchNet import HomoDispNet
 from model.utils.tools import *
-from model.loss.common_loss import *
-from model.loss.video_loss import *
+from model.loss.video_loss import l_num_loss_time, ssim_loss_time, VggPerceptualLossTime
 from model.VideoColorStitchNet import VideoColorStitchNet
 
 from model.loss.vgg_loss import VGGPerceptualLoss
@@ -170,7 +169,7 @@ def main(args):
     net = nn.parallel.DistributedDataParallel(net, device_ids=[local_rank], output_device=local_rank)
 
     # loss 模块
-    vgg_loss_module = VGGPerceptualLoss().to(device)
+    vgg_loss_module = VggPerceptualLossTime().to(device)
     total_params = count_params(net)
 
     if rank == 0:
@@ -233,6 +232,8 @@ def main(args):
 
         for i, (imgs, img_original) in enumerate(loader):
             imgs = imgs.to(device, non_blocking=True)
+            # if rank == 0:
+            #     print(f"imgs shape: {imgs.shape}")
             img_original = img_original.to(device, non_blocking=True)
 
             # ---------- Forward ----------
@@ -240,12 +241,10 @@ def main(args):
 
             # ---------- Loss ----------
             # loss_l_num = l1_charbonnier_loss(outs, img_original)
-            loss_l_num = l_num_loss(outs, img_original, num=l_num)
-            loss_ssim = ssim_loss(outs, img_original, window_size=11, is_train=True)
-            loss_gradient = gradient_loss(outs, img_original)
-            loss_affine = affine_loss(net.module.theta)  # 按你原始写法保留
+            loss_l_num = l_num_loss_time(outs, img_original, num=l_num)
+            loss_ssim = ssim_loss_time(outs, img_original, window_size=11, is_train=True)
             loss_vgg = vgg_loss_module(outs, img_original)
-            loss = lambda1 * loss_l_num + lambda2 * loss_ssim + lambda3 * loss_affine + lambda4 * loss_vgg
+            loss = lambda1 * loss_l_num + lambda2 * loss_ssim + lambda4 * loss_vgg
             
             # ---------- Backward ----------
             optimizer.zero_grad(set_to_none=True)
@@ -260,23 +259,23 @@ def main(args):
                 # print(f"Step {global_step} | Loss: {loss.item():.4f} | ")
                 writer.add_scalar("Loss/L_num", loss_l_num.item(), global_step)
                 writer.add_scalar("Loss/SSIM", loss_ssim.item(), global_step)
-                writer.add_scalar("Loss/Gradient", loss_gradient.item(), global_step)
-                writer.add_scalar("Loss/Affine", loss_affine.item(), global_step)
+                # writer.add_scalar("Loss/Gradient", loss_gradient.item(), global_step)
+                # writer.add_scalar("Loss/Affine", loss_affine.item(), global_step)
                 writer.add_scalar("Loss/VGG", loss_vgg.item(), global_step)
                 writer.add_scalar("Loss/Total", loss.item(), global_step)
 
                 if (global_step % log_interval == 0) and (global_step > 0):
-                    vis_front = imgs[0,0].detach().cpu()
-                    vis_right = imgs[0,1].detach().cpu()
-                    vis_back  = imgs[0,2].detach().cpu()
-                    vis_left  = imgs[0,3].detach().cpu()
-                    vis_out   = outs[0].detach().cpu().clamp(0, 1)
+                    vis_front = imgs[0,0,0].detach().cpu()
+                    vis_right = imgs[0,0,1].detach().cpu()
+                    vis_back  = imgs[0,0,2].detach().cpu()
+                    vis_left  = imgs[0,0,3].detach().cpu()
+                    vis_out   = outs[0,0].detach().cpu().clamp(0, 1)
                     writer.add_images("Images/Front", vis_front.unsqueeze(0), global_step)
                     writer.add_images("Images/Left",  vis_left.unsqueeze(0),  global_step)
                     writer.add_images("Images/Back",  vis_back.unsqueeze(0),  global_step)
                     writer.add_images("Images/Right", vis_right.unsqueeze(0), global_step)
                     writer.add_images("Images/Output", vis_out.unsqueeze(0),  global_step)
-                    writer.add_images("Images/GroundTruth", img_original[0].detach().cpu().unsqueeze(0), global_step)
+                    writer.add_images("Images/GroundTruth", img_original[0, 0].detach().cpu().unsqueeze(0), global_step)
 
                     # weights
                     if net.module.weights is not None:

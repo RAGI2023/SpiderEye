@@ -114,19 +114,19 @@ class UNetGRU(nn.Module):
 
         c1, c2, c3, c4, c5, c6, c7, cf = 16, 32, 64, 128, 256, 128, 256, 32
         self.N = 4  # Number of input views
-        self.en_map_c = c5  
+        self.en_map_c = c7  
         # ------- Encoder -------
         self.down1 = downconv_double(3, c1, 7)
         self.down2 = downconv_double(c1, c2, 5)
         self.down3 = downconv_double(c2, c3, 3)
         self.down4 = downconv_double(c3, c4, 3)
         self.down5 = downconv_double(c4, c5, 3)
-        # self.down6 = downconv_double(c5, c6, 3)
-        # self.down7 = downconv_double(c6, c7, 3)
+        self.down6 = downconv_double(c5, c6, 3)
+        self.down7 = downconv_double(c6, c7, 3)
 
         # ------- Decoder -------
-        # self.up7 = upconv_single(c7 * self.N, c6 * self.N, 3)
-        # self.up6 = upconv_single(c6 * self.N, c5 * self.N, 3)
+        self.up7 = upconv_single(c7 * self.N, c6 * self.N, 3)
+        self.up6 = upconv_single(c6 * self.N, c5 * self.N, 3)
         self.up5 = upconv_single(c5 * self.N, c4 * self.N, 3)
         self.up4 = upconv_single(c4 * self.N, c3 * self.N, 3)
         self.up3 = upconv_single(c3 * self.N, c2 * self.N, 3)
@@ -144,8 +144,8 @@ class UNetGRU(nn.Module):
 
 
         self.gru_cell = ConvGRUCell(
-            input_dim=self.final_c*self.N,
-            hidden_dim=self.final_c*self.N,
+            input_dim=self.en_map_c*self.N,
+            hidden_dim=self.en_map_c*self.N,
             kernel_size=3,
         )
 
@@ -172,6 +172,16 @@ class UNetGRU(nn.Module):
         """
         self.gru_cell.reset_state()
 
+    def encode_single(self, x):
+        """Encode one input image and return all intermediate feature maps."""
+        d1 = self.down1(x)
+        d2 = self.down2(d1)
+        d3 = self.down3(d2)
+        d4 = self.down4(d3)
+        d5 = self.down5(d4)
+        d6 = self.down6(d5)
+        d7 = self.down7(d6)
+        return [d1, d2, d3, d4, d5, d6, d7]
     # =============== Forward ===============
     def forward(self, inputs, return_encoding: bool = True):
         """
@@ -206,24 +216,23 @@ class UNetGRU(nn.Module):
             cat_features.append(cat_layer)
 
         # -------- Decode with skip connections --------
-        # d1, d2, d3, d4, d5, d6, d7 = cat_features  # d7: [B, c7*N, H/64, W/64]
-        d1, d2, d3, d4, d5 = cat_features  # d7: [B, c7*N, H/64, W/64]
+        d1, d2, d3, d4, d5, d6, d7 = cat_features  # d7: [B, c7*N, H/64, W/64]
+        # d1, d2, d3, d4, d5 = cat_features  # d7: [B, c7*N, H/64, W/64]
 
         # 在最深层特征上应用 ConvGRU
-        d5 = self.gru_cell(d5)  # apply ConvGRU on the deepest features
+        d7 = self.gru_cell(d7)  # apply ConvGRU on the deepest features
+        encoding_map = d7  # deepest feature (Encoding Map)
 
-        encoding_map = d5  # deepest feature (Encoding Map)
+        u7 = self.up7(d7)
+        u7 = self.conv7(torch.cat([u7, d6], dim=1))
 
-        # u7 = self.up7(d7)
-        # u7 = self.conv7(torch.cat([u7, d6], dim=1))
+        u6 = self.up6(u7)
+        u6 = self.conv6(torch.cat([u6, d5], dim=1))
 
-        # u6 = self.up6(u7)
-        # u6 = self.conv6(torch.cat([u6, d5], dim=1))
+        u5 = self.up5(u6)
+        u5 = self.conv5(torch.cat([u5, d4], dim=1))
 
-        # u5 = self.up5(u6)
-        # u5 = self.conv5(torch.cat([u5, d4], dim=1))
-
-        u4 = self.up4(d5)
+        u4 = self.up4(u5)
         u4 = self.conv4(torch.cat([u4, d3], dim=1))
 
         u3 = self.up3(u4)
