@@ -101,10 +101,10 @@ class EquiDataset(Dataset):
 
 if __name__ == "__main__":
     from torch.utils.data import DataLoader
-    K = (0.01, -0.1, 0.1, -0.0)
+    K = (0.35, -0.0015, 0.002, -0.002)
     # K = (0.0, 0.0, 0.0, 0.0)
     dataset = EquiDataset(folder_path="../360SP-data/panoramas", 
-                        fov=254, canvas_size=(1024, 512), out_w=512, out_h=512, k=K, jitter_cfg=DEFAULT_JITTER_CONFIG)
+                        fov=180, canvas_size=(1024, 512), out_w=512, out_h=512, k=K, jitter_cfg=DEFAULT_JITTER_CONFIG)
     print('Dataset length:', len(dataset))
     loader = DataLoader(dataset, batch_size=1, shuffle=True, num_workers=1)
     write_img = True

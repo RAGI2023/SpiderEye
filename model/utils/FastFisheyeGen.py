@@ -2,6 +2,8 @@ import cv2 as cv
 import numpy as np
 import math
 
+from equirect_utils import solve_theta_limit
+
 # =============================
 # Fast Fisheye Projector
 # =============================
@@ -37,10 +39,15 @@ class FastFisheyeProjector:
             self.k3 * theta**6 + self.k4 * theta**8
         )
 
-        # 圆形 mask（fisheye valid region）
-        mask = theta <= (self.fov / 2)
+        k1, k2, k3, k4 = self.k1, self.k2, self.k3, self.k4
+        theta_d = theta * (1 + k1 * theta**2 + k2 * theta**4 + k3 * theta**6 + k4 * theta**8)
+        theta_limit = solve_theta_limit((k1, k2, k3, k4), theta_max=self.fov / 2)
+        if theta_limit is not None:
+            r_limit = (theta_limit / (self.fov / 2)) * (diag / 2)
+            mask = r <= r_limit
+        else:
+            mask = np.ones_like(r, dtype=bool)
         self.mask = mask
-
         # -----------------------------
         # 基础方向射线 (未旋转)
         # -----------------------------
