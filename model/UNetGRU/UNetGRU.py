@@ -1,11 +1,11 @@
 import torch
 import torch.nn as nn
 
-from model.UNet.UNet import UNet
+from model.UNet.UNet import upconv_single, downconv_double, identity_conv
 
 
 class ConvGRUCell(nn.Module):
-    def __init__(self, input_dim, hidden_dim=None, kernel_size=3, stride=1, N=4):
+    def __init__(self, input_dim, hidden_dim=None, kernel_size=3, stride=1):
         """
         ConvGRUCell with configurable gate blocks (update, reset, candidate).
         Each gate uses a double-conv block: Conv → BN → ReLU → Conv → BN
@@ -21,11 +21,7 @@ class ConvGRUCell(nn.Module):
         if hidden_dim is None:
             hidden_dim = input_dim
 
-        input_dim *= N
-        hidden_dim *= N
-
         self.hidden_dim = hidden_dim
-        self.N = N
 
         # =============== Gate Blocks ===============
         # Update gate z_t
@@ -107,7 +103,7 @@ class ConvGRUCell(nn.Module):
         return h_new
 
 
-class UNetGRU(UNet):
+class UNetGRU(nn.Module):
     """
     在原始 UNet 的 bottleneck (d7) 上插入 ConvGRU，
     用于视频时序一致性；兼容图片 & 视频两种模式。
@@ -116,15 +112,41 @@ class UNetGRU(UNet):
     def __init__(self):
         super().__init__()
 
-        # 假设 UNet 中:
-        #   self.c7: bottleneck 单视角通道数
-        #   self.N : 视角数量（4 fish-eyes）
-        # ConvGRU 以“单视角通道数”为 input_dim/hidden_dim，内部会乘 N
+        c1, c2, c3, c4, c5, c6, c7, cf = 16, 32, 64, 128, 256, 128, 256, 32
+        self.N = 4  # Number of input views
+        self.en_map_c = c5  
+        # ------- Encoder -------
+        self.down1 = downconv_double(3, c1, 7)
+        self.down2 = downconv_double(c1, c2, 5)
+        self.down3 = downconv_double(c2, c3, 3)
+        self.down4 = downconv_double(c3, c4, 3)
+        self.down5 = downconv_double(c4, c5, 3)
+        # self.down6 = downconv_double(c5, c6, 3)
+        # self.down7 = downconv_double(c6, c7, 3)
+
+        # ------- Decoder -------
+        # self.up7 = upconv_single(c7 * self.N, c6 * self.N, 3)
+        # self.up6 = upconv_single(c6 * self.N, c5 * self.N, 3)
+        self.up5 = upconv_single(c5 * self.N, c4 * self.N, 3)
+        self.up4 = upconv_single(c4 * self.N, c3 * self.N, 3)
+        self.up3 = upconv_single(c3 * self.N, c2 * self.N, 3)
+        self.up2 = upconv_single(c2 * self.N, c1 * self.N, 3)
+        self.up1 = upconv_single(c1 * self.N, cf, 3)
+
+        # ------- Skip connection fusion layers -------
+        self.conv7 = identity_conv(c6 * self.N * 2, c6 * self.N)
+        self.conv6 = identity_conv(c5 * self.N * 2, c5 * self.N)
+        self.conv5 = identity_conv(c4 * self.N * 2, c4 * self.N)
+        self.conv4 = identity_conv(c3 * self.N * 2, c3 * self.N)
+        self.conv3 = identity_conv(c2 * self.N * 2, c2 * self.N)
+        self.conv2 = identity_conv(c1 * self.N * 2, c1 * self.N)
+        self.conv1 = identity_conv(cf, 16)
+
+
         self.gru_cell = ConvGRUCell(
-            input_dim=self.c7,
-            hidden_dim=self.c7,
+            input_dim=self.final_c*self.N,
+            hidden_dim=self.final_c*self.N,
             kernel_size=3,
-            N=self.N
         )
 
         # True: 视频模式（跨 forward 保留时序状态）
@@ -184,23 +206,24 @@ class UNetGRU(UNet):
             cat_features.append(cat_layer)
 
         # -------- Decode with skip connections --------
-        d1, d2, d3, d4, d5, d6, d7 = cat_features  # d7: [B, c7*N, H/64, W/64]
+        # d1, d2, d3, d4, d5, d6, d7 = cat_features  # d7: [B, c7*N, H/64, W/64]
+        d1, d2, d3, d4, d5 = cat_features  # d7: [B, c7*N, H/64, W/64]
 
         # 在最深层特征上应用 ConvGRU
-        d7 = self.gru_cell(d7)  # apply ConvGRU on the deepest features
+        d5 = self.gru_cell(d5)  # apply ConvGRU on the deepest features
 
-        encoding_map = d7  # deepest feature (Encoding Map)
+        encoding_map = d5  # deepest feature (Encoding Map)
 
-        u7 = self.up7(d7)
-        u7 = self.conv7(torch.cat([u7, d6], dim=1))
+        # u7 = self.up7(d7)
+        # u7 = self.conv7(torch.cat([u7, d6], dim=1))
 
-        u6 = self.up6(u7)
-        u6 = self.conv6(torch.cat([u6, d5], dim=1))
+        # u6 = self.up6(u7)
+        # u6 = self.conv6(torch.cat([u6, d5], dim=1))
 
-        u5 = self.up5(u6)
-        u5 = self.conv5(torch.cat([u5, d4], dim=1))
+        # u5 = self.up5(u6)
+        # u5 = self.conv5(torch.cat([u5, d4], dim=1))
 
-        u4 = self.up4(u5)
+        u4 = self.up4(d5)
         u4 = self.conv4(torch.cat([u4, d3], dim=1))
 
         u3 = self.up3(u4)

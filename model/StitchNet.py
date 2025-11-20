@@ -1,12 +1,12 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torchvision import transforms
 import math
 
 from model.UNet.UNet import UNet
 from model.LinkNet.LinkNet import LinkNet
 from model.Regnet.Regnet import Regressor
+from model.UNetGRU.UNetGRU import UNetGRU
 
 class MetaStitcher(nn.Module):
     """
@@ -28,6 +28,11 @@ class MetaStitcher(nn.Module):
             self.backbone = UNet()
         elif backbone_type == 'LinkNet':
             self.backbone = LinkNet()
+        elif backbone_type == 'UNetGRU':
+            self.backbone = UNetGRU()
+            use_GRU = opt.get('use_GRU', True)
+            if not use_GRU:
+                self.backbone.enable_GRU(False)
         else:
             raise ValueError(f"Not supported type: {backbone_type}")
         self.Regressor = Regressor(opt)

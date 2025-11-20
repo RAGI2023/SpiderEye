@@ -21,12 +21,12 @@ class ColorStitchNet(HomoDispNet):
         # 将 input_direction 与实际 N 对齐
         self.input_direction = N
         
+        self.flow_map = []
         iconv_1, downfeature = self.backbone(images)    # iconv_1: [B, 16, H, W]
 
         theta  = self.Regressor(downfeature)        # [B, homography*N, 2, 3]
         
         self.theta = theta  # for loss computation
-        self.flow_map = []
 
         # 生成每个方向/每个单应的权重 & 位姿参数
         weight = self.weight_block(iconv_1)         # [B, homography*N, H, W]
@@ -64,5 +64,7 @@ class ColorStitchNet(HomoDispNet):
             # 以该方向的权重进行融合
             weight_i = weight[:, start:end, ...]     # [B, homography, H, W]
             panorama += self.weighted_sum(warped_images, weight_i)
-
+        
+        self.flow_map = torch.stack(self.flow_map, dim=1)  # [B, N, H, W, 2*homography]
+        
         return panorama

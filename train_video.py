@@ -12,10 +12,12 @@ from torch.utils.tensorboard import SummaryWriter
 
 from model.utils.EquiDataset import EquiDataset
 from model.utils.FishEyeDataset import FishEyeDataset
+from model.utils.EquiVideoDataset import EquiVideoDataset
 from model.StitchNet import HomoDispNet
 from model.utils.tools import *
 from model.loss.common_loss import *
-from model.ColorStitchNet import ColorStitchNet
+from model.loss.video_loss import *
+from model.VideoColorStitchNet import VideoColorStitchNet
 
 from model.loss.vgg_loss import VGGPerceptualLoss
 
@@ -80,12 +82,14 @@ def main(args):
     elif dataset_type == 'equi_video':
         dataset = EquiVideoDataset(video_root=g_cfg.data.train_dataset,
                                    fov=g_cfg.data.fov,
+                                   clip_len=g_cfg.train.clip_len,
                                    canvas_size=(g_cfg.data.canvas_size[0], g_cfg.data.canvas_size[1]),
                                     out_w=g_cfg.data.canvas_size[1],
                                     out_h=g_cfg.data.canvas_size[1],
                                     jitter_cfg=jitter_cfg,
                                     k=(0.35, -0.0015, 0.002, -0.002))
         eval_dataset = EquiVideoDataset(video_root=g_cfg.data.eval_dataset,
+                                   clip_len=g_cfg.train.clip_len,
                                    fov=g_cfg.data.fov,
                                    canvas_size=(g_cfg.data.canvas_size[0], g_cfg.data.canvas_size[1]),
                                     out_w=g_cfg.data.canvas_size[1],
@@ -159,14 +163,13 @@ def main(args):
         print(f"Dataset size: {len(dataset)} | Batch size: {g_cfg.train.batch_size}")
 
     # ---------------- Model ----------------
-    net = ColorStitchNet(opt=g_cfg.model, device=device)
+    net = VideoColorStitchNet(opt=g_cfg.model, device=device)
 
     net = torch.nn.SyncBatchNorm.convert_sync_batchnorm(net)
     net = net.to(device)
     net = nn.parallel.DistributedDataParallel(net, device_ids=[local_rank], output_device=local_rank)
 
     # loss 模块
-    affine_loss_module = FlowIdentityLoss(reduction='mean').to(device)  # 仅保留，若不用可删除
     vgg_loss_module = VGGPerceptualLoss().to(device)
     total_params = count_params(net)
 
