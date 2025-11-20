@@ -2,7 +2,7 @@ import cv2 as cv
 import numpy as np
 import math
 
-from equirect_utils import solve_theta_limit
+from model.utils.equirect_utils import solve_theta_limit
 
 # =============================
 # Fast Fisheye Projector

@@ -6,7 +6,7 @@ data:
   train_dataset: "../360_video/train"
   eval_dataset: "../360_video/eval"
   dataset_type: "equi_video" # "fisheye" , "equi_video" or "panorama"
-  fov: 254
+  fov: 180
   canvas_size: [512, 256]
   overlap: 0.5
   jitter:

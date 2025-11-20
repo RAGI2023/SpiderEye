@@ -8,10 +8,7 @@ from torch.utils.data import Dataset
 # ----------------------------------------------------------
 # FastFisheyeProjector
 # ----------------------------------------------------------
-try:
-    from FastFisheyeGen import FastFisheyeProjector
-except ImportError:
-    from model.utils.FastFisheyeGen import FastFisheyeProjector
+from model.utils.FastFisheyeGen import FastFisheyeProjector
 
 
 class EquiVideoDataset(Dataset):
