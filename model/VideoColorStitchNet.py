@@ -29,7 +29,6 @@ class VideoColorStitchNet(ColorStitchNet):
 
         for t in range(T):
             images_t = clip[:, t, ...]         # [B, N, 3, H, W]
-
             panorama_t = super().forward(images_t)   # [B, 3, H, W]
             self.recorded_flow.append(self.flow_map) # for loss computation
             pano_list.append(panorama_t)
