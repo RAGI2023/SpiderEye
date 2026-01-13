@@ -1,52 +1,37 @@
-import cv2 as cv
-import numpy as np
-import math
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+Equirectangular panorama -> fisheye views using UCM (Unified Camera Model)
+
+Key points:
+- Correct 6 canonical view directions via base_dir (front/back/left/right/top/bottom)
+- Optional circular mask to black-out pixels outside the fisheye image circle
+  * mask_mode="inscribed" (default): radius = min(W,H)/2
+  * mask_mode="diagonal":  radius = sqrt(W^2+H^2)/2
+  * mask_mode="none":      no mask
+- Keep yaw/pitch/roll + lighting jitter
+- Keep deprecated fov_diag_deg fallback ONLY if f_pix not provided (pinhole approximation)
+
+Dependencies:
+  pip install numpy opencv-python
+"""
+
 import os
+import math
 import random
-from scipy.optimize import root_scalar
-
-def theta_d(theta, k):
-    k1, k2, k3, k4 = k
-    return theta * (1 + k1*theta**2 + k2*theta**4 + 
-                           k3*theta**6 + k4*theta**8)
-
-def diff_theta_d(theta, k):
-    k1, k2, k3, k4 = k
-    return (1 + 3*k1*theta**2 + 5*k2*theta**4 + 
-                  7*k3*theta**6 + 9*k4*theta**8)
-def solve_theta_limit(k, theta_max=math.pi/2):
-    f = lambda t: theta_d(t, k) - theta_max
-    df = lambda t: diff_theta_d(t, k)
-    # 自动找区间：先从 0 到 π
-    left, right = 0.0, math.pi/2.0
-
-    # 检查是否有解
-    if f(left) > 0: 
-        return left
-    if f(right) < 0:
-        return None  # 无解
-
-    sol1 = root_scalar(f, bracket=[left, right], method='brentq')
-    return sol1.root
-
+import warnings
+import numpy as np
+import cv2 as cv
 
 # ==========================================================
-# 统一的默认扰动配置
+# Jitter configs
 # ==========================================================
 DEFAULT_JITTER_CONFIG = {
-    "random_seed": None,      # 设置为 None 表示每次运行随机；否则固定随机性
-    "rotation_jitter": {      # 旋转扰动范围（度）
-        "yaw": 3.0,
-        "pitch": 3.0,
-        "roll": 3.0
-    },
-    "translate_range": 3.0,  # 平移扰动范围（像素）
-    "lighting": {             # 光照扰动参数
-        "brightness": 0.2,    # 亮度扰动 [-0.2, 0.2]
-        "contrast": 0.2,      # 对比度扰动 [-0.2, 0.2]
-        "color_jitter": 0.1,   # RGB颜色扰动 [-0.1, 0.1]
-    },
-    "k_jitter": 0.2,
+    "random_seed": None,
+    "rotation_jitter": {"yaw": 3.0, "pitch": 3.0, "roll": 3.0},
+    "translate_range": 3.0,
+    "lighting": {"brightness": 0.2, "contrast": 0.2, "color_jitter": 0.1},
 }
 
 NO_JITTER_CONFIG = {
@@ -54,20 +39,18 @@ NO_JITTER_CONFIG = {
     "rotation_jitter": {"yaw": 0.0, "pitch": 0.0, "roll": 0.0},
     "translate_range": 0.0,
     "lighting": {"brightness": 0.0, "contrast": 0.0, "color_jitter": 0.0},
-    "k_jitter": 0.0,
 }
 
 # ==========================================================
-# 光照扰动模块
+# Lighting jitter
 # ==========================================================
 def apply_lighting_jitter(img, cfg):
-    """根据配置对图像进行光照扰动"""
     b_rng = cfg.get("brightness", 0.2)
     c_rng = cfg.get("contrast", 0.2)
     col_rng = cfg.get("color_jitter", 0.1)
 
-    alpha = 1.0 + random.uniform(-c_rng, c_rng)        # 对比度
-    beta = 255 * random.uniform(-b_rng, b_rng)         # 亮度
+    alpha = 1.0 + random.uniform(-c_rng, c_rng)        # contrast
+    beta = 255 * random.uniform(-b_rng, b_rng)         # brightness
     rgb_gain = np.array([
         1.0 + random.uniform(-col_rng, col_rng),
         1.0 + random.uniform(-col_rng, col_rng),
@@ -78,29 +61,130 @@ def apply_lighting_jitter(img, cfg):
     img = cv.convertScaleAbs(img, alpha=alpha, beta=beta).astype(np.float32)
     return img
 
+# ==========================================================
+# Rotation helpers
+# World/camera convention:
+#   x=right, y=up, z=forward
+# yaw about +y, pitch about +x, roll about +z
+# ==========================================================
+def R_from_yaw_pitch_roll(yaw_deg, pitch_deg, roll_deg):
+    yaw = math.radians(yaw_deg)
+    pitch = math.radians(pitch_deg)
+    roll = math.radians(roll_deg)
 
-def perspective_projection_fisheye(
+    Rx = np.array([[1, 0, 0],
+                   [0, math.cos(pitch), -math.sin(pitch)],
+                   [0, math.sin(pitch),  math.cos(pitch)]], dtype=np.float32)
+    Ry = np.array([[ math.cos(yaw), 0, math.sin(yaw)],
+                   [0, 1, 0],
+                   [-math.sin(yaw), 0, math.cos(yaw)]], dtype=np.float32)
+    Rz = np.array([[math.cos(roll), -math.sin(roll), 0],
+                   [math.sin(roll),  math.cos(roll), 0],
+                   [0, 0, 1]], dtype=np.float32)
+
+    return (Rz @ Rx @ Ry).astype(np.float32)
+
+def look_at_rotation(dir_vec, up_hint=np.array([0.0, 1.0, 0.0], dtype=np.float32)):
+    """
+    Return R such that v_world = R @ v_cam and camera forward (0,0,1) maps to dir_vec.
+    """
+    f = np.array(dir_vec, dtype=np.float32)
+    f = f / (np.linalg.norm(f) + 1e-8)
+
+    up = np.array(up_hint, dtype=np.float32)
+    if abs(float(np.dot(f, up))) > 0.99:
+        up = np.array([0.0, 0.0, 1.0], dtype=np.float32)
+
+    r = np.cross(up, f)
+    r = r / (np.linalg.norm(r) + 1e-8)
+    u = np.cross(f, r)
+
+    # columns are the world basis of cam x,y,z
+    return np.stack([r, u, f], axis=1).astype(np.float32)
+
+# ==========================================================
+# UCM lifting: pixel -> unit ray in camera frame
+# Input y is image-down; convert to camera-up internally.
+# ==========================================================
+def ucm_pixel_to_ray(x_pix, y_pix, f_pix, xi):
+    mx = x_pix / f_pix
+    my = y_pix / f_pix
+
+    # image y-down -> camera y-up
+    my = -my
+
+    r2 = mx * mx + my * my
+    d = np.sqrt(1.0 + (1.0 - xi * xi) * r2)
+    omega = (xi + d) / (r2 + 1.0)
+
+    X = omega * mx
+    Y = omega * my
+    Z = omega - xi
+
+    n = np.sqrt(X * X + Y * Y + Z * Z) + 1e-8
+    return X / n, Y / n, Z / n
+
+# ==========================================================
+# Build circular mask
+# ==========================================================
+def build_circular_mask(out_h, out_w, mode="inscribed"):
+    """
+    mode:
+      - "inscribed": radius = min(W,H)/2  (typical fisheye circle, corners black)
+      - "diagonal":  radius = sqrt(W^2+H^2)/2 (covers corners too)
+      - "none":      no mask (all True)
+    """
+    mode = str(mode).lower()
+    if mode == "none":
+        return np.ones((out_h, out_w), dtype=bool)
+
+    cx = (out_w - 1) / 2.0
+    cy = (out_h - 1) / 2.0
+    xv, yv = np.meshgrid(np.arange(out_w, dtype=np.float32),
+                         np.arange(out_h, dtype=np.float32))
+    r_pix = np.sqrt((xv - cx) ** 2 + (yv - cy) ** 2)
+
+    if mode == "diagonal":
+        r_max = math.sqrt(out_w ** 2 + out_h ** 2) / 2.0
+    else:
+        # default inscribed
+        r_max = min(out_w, out_h) / 2.0
+
+    return (r_pix <= r_max)
+
+# ==========================================================
+# Main conversion: Equirect -> UCM fisheye
+# kwargs:
+#   xi (float), f_pix (float preferred)
+#   fov_diag_deg (deprecated fallback if f_pix None)
+#   mask_mode: "inscribed"|"diagonal"|"none"
+# ==========================================================
+def equirect_to_fisheye_ucm(
     equirect,
-    fov_diag_deg=180,
-    yaw_deg=0,
-    pitch_deg=0,
-    roll_deg=0,
     out_w=800,
     out_h=800,
+    base_dir=None,
+    yaw_deg=0.0,
+    pitch_deg=0.0,
+    roll_deg=0.0,
     interpolation=cv.INTER_LINEAR,
-    translate=(0, 0, 0),
     jitter_cfg=None,
-    k=(0.0, 0.0, 0.0, 0.0),   # (k1, k2, k3, k4)
-    f=1.0,                     # 等效焦距
+    **kwargs,
 ):
-    """
-    从 equirect 全景图生成基于 OpenCV 鱼眼模型的真实鱼眼投影视图
-    支持正确的圆形 mask (基于旋转后的入射角 θ)
-    """
+    xi = float(kwargs.get("xi", 0.9))
+    f_pix = kwargs.get("f_pix", None)
+    mask_mode = kwargs.get("mask_mode", "inscribed")
 
-    # -------------------------------
-    # 初始化扰动配置
-    # -------------------------------
+    fov_diag_deg = kwargs.get("fov_diag_deg", None)
+    if fov_diag_deg is not None:
+        warnings.warn(
+            "Argument 'fov_diag_deg' is deprecated for UCM. "
+            "Please pass explicit UCM parameters: f_pix and xi. "
+            "This fallback uses a pinhole approximation only.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
     if jitter_cfg is None:
         jitter_cfg = {}
 
@@ -110,167 +194,134 @@ def perspective_projection_fisheye(
         np.random.seed(seed)
 
     rot_jit = jitter_cfg.get("rotation_jitter", {})
-    trans_range = jitter_cfg.get("translate_range", 0.0)
     light_cfg = jitter_cfg.get("lighting", {})
-    
 
-    # 扰动
+    # rotation jitter
     yaw_deg += random.uniform(-rot_jit.get("yaw", 0), rot_jit.get("yaw", 0))
     pitch_deg += random.uniform(-rot_jit.get("pitch", 0), rot_jit.get("pitch", 0))
     roll_deg += random.uniform(-rot_jit.get("roll", 0), rot_jit.get("roll", 0))
-    tx, ty, tz = np.random.uniform(-trans_range, trans_range, 3)
-    translate = (tx, ty, tz)
 
-    # -------------------------------
-    # 网格生成
-    # -------------------------------
     H, W = equirect.shape[:2]
-    diag = math.sqrt(out_w**2 + out_h**2)
-    fov_d = math.radians(fov_diag_deg)
 
-    xs = np.linspace(-out_w / 2, out_w / 2, out_w, dtype=np.float32)
-    ys = np.linspace(-out_h / 2, out_h / 2, out_h, dtype=np.float32)
-    xv, yv = np.meshgrid(xs, ys)
-    r = np.sqrt(xv**2 + yv**2)
+    # output principal point
+    cx = (out_w - 1) / 2.0
+    cy = (out_h - 1) / 2.0
 
-    # 归一化半径
-    r_norm = r / (diag / 2)
-    theta = r_norm * (fov_d / 2)  # 入射角 θ
+    xv, yv = np.meshgrid(np.arange(out_w, dtype=np.float32),
+                         np.arange(out_h, dtype=np.float32))
+    x_pix = xv - cx
+    y_pix = yv - cy
 
-    # -------------------------------
-    # 应用 OpenCV 鱼眼模型
-    # -------------------------------
-    k1, k2, k3, k4 = k
-    theta_d = theta * (1 + k1 * theta**2 + k2 * theta**4 + k3 * theta**6 + k4 * theta**8)
-    theta_limit = solve_theta_limit(k, theta_max=fov_d / 2)
-    if theta_limit is not None:
-        r_limit = (theta_limit / (fov_d / 2)) * (diag / 2)
-        mask = r <= r_limit
-    else:
-        mask = np.ones_like(r, dtype=bool)
+    # choose f_pix if not provided
+    if f_pix is None:
+        if fov_diag_deg is None:
+            fov_diag_deg = 180.0
+            warnings.warn(
+                "Neither 'f_pix' nor 'fov_diag_deg' provided. "
+                "Fallback to deprecated fov_diag_deg=180. Please pass f_pix for UCM.",
+                UserWarning,
+                stacklevel=2,
+            )
+        # Pinhole approx: r = f * tan(theta). Use diagonal half-radius.
+        diag = math.sqrt(out_w ** 2 + out_h ** 2)
+        r_max = diag / 2.0
+        theta_max = math.radians(float(fov_diag_deg)) / 2.0
+        f_pix = r_max / max(math.tan(theta_max), 1e-6)
 
-    # -------------------------------
-    # 构建射线 (相机坐标系下)
-    # -------------------------------
-    dirs = np.stack([
-        np.sin(theta_d) * (xv / (r + 1e-8)),
-        -np.sin(theta_d) * (yv / (r + 1e-8)),
-        np.cos(theta_d)
-    ], axis=-1)
+    f_pix = float(f_pix)
 
-    dirs += np.array(translate, dtype=np.float32)
-    dirs /= np.linalg.norm(dirs, axis=-1, keepdims=True)
+    # pixel -> ray (camera)
+    Xc, Yc, Zc = ucm_pixel_to_ray(x_pix, y_pix, f_pix, xi)
+    dirs_cam = np.stack([Xc, Yc, Zc], axis=-1).astype(np.float32)
 
-    # -------------------------------
-    # 旋转矩阵
-    # -------------------------------
-    yaw, pitch, roll = map(math.radians, [yaw_deg, pitch_deg, roll_deg])
-    Rx = np.array([[1, 0, 0],
-                   [0, math.cos(pitch), -math.sin(pitch)],
-                   [0, math.sin(pitch),  math.cos(pitch)]], dtype=np.float32)
-    Ry = np.array([[math.cos(yaw), 0, math.sin(yaw)],
-                   [0, 1, 0],
-                   [-math.sin(yaw), 0, math.cos(yaw)]], dtype=np.float32)
-    Rz = np.array([[math.cos(roll), -math.sin(roll), 0],
-                   [math.sin(roll),  math.cos(roll), 0],
-                   [0, 0, 1]], dtype=np.float32)
-    R = Rz @ Rx @ Ry
-    dirs = dirs @ R.T
+    # base direction
+    if base_dir is None:
+        base_dir = np.array([0.0, 0.0, 1.0], dtype=np.float32)
 
-    # -------------------------------
-    # 球面采样
-    # -------------------------------
+    R_base = look_at_rotation(np.array(base_dir, dtype=np.float32))
+    R_local = R_from_yaw_pitch_roll(yaw_deg, pitch_deg, roll_deg)
+    R = (R_base @ R_local).astype(np.float32)
+
+    dirs = dirs_cam @ R.T
+
+    # ray -> equirect
     X, Y, Z = dirs[..., 0], dirs[..., 1], dirs[..., 2]
-    theta_equi = np.arctan2(X, Z)
-    phi = np.arcsin(Y)
+    lon = np.arctan2(X, Z)
+    lat = np.arcsin(np.clip(Y, -1.0, 1.0))
 
-    map_x = (theta_equi + math.pi) / (2 * math.pi) * W
-    map_y = (math.pi / 2 - phi) / math.pi * H
+    map_x = (lon + math.pi) / (2 * math.pi) * W
+    map_y = (math.pi / 2 - lat) / math.pi * H
 
-    view = cv.remap(equirect, map_x.astype(np.float32), map_y.astype(np.float32),
-                    interpolation, borderMode=cv.BORDER_WRAP)
+    view = cv.remap(
+        equirect,
+        map_x.astype(np.float32),
+        map_y.astype(np.float32),
+        interpolation,
+        borderMode=cv.BORDER_WRAP,
+    )
 
+    # lighting jitter
     view = apply_lighting_jitter(view, light_cfg)
 
+    # apply circular mask (the "black outside FOV" behavior)
+    mask = build_circular_mask(out_h, out_w, mode=mask_mode)
     view[~mask] = 0
 
-    return view
-
+    return np.clip(view, 0, 255).astype(np.uint8)
 
 # ==========================================================
-# 主入口：测试生成六面体视图
+# Demo: generate 6 canonical views (directions correct)
 # ==========================================================
 def main_test_views():
     import time
     img = cv.imread("image.png")
     if img is None:
-        raise FileNotFoundError("No Image input")
+        raise FileNotFoundError("No Image input: image.png")
 
+    # Canonical directions (guaranteed correct)
     views = {
-        "front":  (  0,   0, 0),
-        "back":   (180,   0, 0),
-        "left":   (-90,   0, 0),
-        "right":  ( 90,   0, 0),
-        "top":    (  0,  90, 0),
-        "bottom": (  0, -90, 0),
+        "front":  np.array([ 0.0,  0.0,  1.0], dtype=np.float32),
+        "back":   np.array([ 0.0,  0.0, -1.0], dtype=np.float32),
+        "left":   np.array([-1.0,  0.0,  0.0], dtype=np.float32),
+        "right":  np.array([ 1.0,  0.0,  0.0], dtype=np.float32),
+        "top":    np.array([ 0.0,  1.0,  0.0], dtype=np.float32),
+        "bottom": np.array([ 0.0, -1.0,  0.0], dtype=np.float32),
     }
 
-    # 可修改配置
     cfg = {
         "random_seed": 42,
         "rotation_jitter": {"yaw": 0, "pitch": 0, "roll": 0},
         "translate_range": 0,
         "lighting": {"brightness": 0.3, "contrast": 0.25, "color_jitter": 0.2},
-        "k": [0.00, 0.00, 0., 0.],
     }
 
     os.makedirs("runs/fisheye_realistic", exist_ok=True)
-    fisheye_params = (0.35, -0.0015, 0.002, -0.002)
-    fisheye_params = tuple(
-        fisheye_params[i] + random.uniform(-cfg["k"][i], cfg["k"][i])
-        for i in range(len(fisheye_params))
+
+    # UCM params + mask
+    ucm_kwargs = dict(
+        xi=0.9,
+        f_pix=220.0,
+        mask_mode="inscribed",   # <<<<<< this is the black-out behavior you asked for
+        # mask_mode="diagonal",
+        # mask_mode="none",
+        # fov_diag_deg=180.0,  # deprecated fallback only
     )
 
-    for name, (yaw, pitch, roll) in views.items():
-        start_time = time.time()
-        out = perspective_projection_fisheye(
+    for name, base_dir in views.items():
+        t0 = time.time()
+        out = equirect_to_fisheye_ucm(
             img,
-            fov_diag_deg=180,
-            yaw_deg=yaw,
-            pitch_deg=pitch,
-            roll_deg=roll,
             out_w=560,
             out_h=560,
-            k=fisheye_params,
-            jitter_cfg=cfg
+            base_dir=base_dir,
+            yaw_deg=0,
+            pitch_deg=0,
+            roll_deg=0,
+            jitter_cfg=cfg,
+            **ucm_kwargs,
         )
-        print(f"{name} view done in {time.time() - start_time:.3f} seconds")
-        if cv.imwrite(f"runs/fisheye_realistic/{name}.png", out):
-            print(f"saved {name}")
-        else:
-            print(f"failed to save {name}")
-
-def main_test_k():
-    img = cv.imread("image.png")
-    os.makedirs("runs/fisheye_realistic", exist_ok=True)
-
-    fisheye_params = (0.08, -0.16, 0.35, -0.26)
-
-
- 
-    out = perspective_projection_fisheye(
-        img,
-        fov_diag_deg=254,
-        yaw_deg=0,
-        pitch_deg=0,
-        roll_deg=0,
-        out_w=560,
-        out_h=560,
-        k=fisheye_params,
-    )
-    cv.imwrite(f"runs/fisheye_realistic/fisheye_d.png", out)
-    print(f"saved fisheye_d.png")
+        print(f"{name} done in {time.time() - t0:.3f}s")
+        cv.imwrite(f"runs/fisheye_realistic/{name}.png", out)
 
 if __name__ == "__main__":
     main_test_views()
-    # main_test_k()
